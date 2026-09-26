@@ -1,0 +1,28 @@
+{
+  "session_id": "d476962b-b3fd-46a0-88e9-74b2e862f66a",
+  "started_at": "2026-09-24T15:15:05.400564+06:00",
+  "ended_at": null,
+  "message_count": 4,
+  "messages": [
+    {
+      "role": "user",
+      "content": "i use an iphone 12",
+      "timestamp": "2026-09-24T15:15:05.413015+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Got it, Boss. The iPhone 12 is still a solid device. What do you need to do with it?",
+      "timestamp": "2026-09-24T15:15:07.933617+06:00"
+    },
+    {
+      "role": "user",
+      "content": "it has 128gb stoage and 85% battery healtjh",
+      "timestamp": "2026-09-24T15:15:24.991059+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Got it, Boss. 128GB storage with 85% battery health. Stored that for your iPhone 12. Anything else you'd like to note about it?",
+      "timestamp": "2026-09-24T15:15:28.571210+06:00"
+    }
+  ]
+}

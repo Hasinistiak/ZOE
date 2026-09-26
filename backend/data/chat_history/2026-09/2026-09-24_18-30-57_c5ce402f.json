@@ -1,0 +1,48 @@
+{
+  "session_id": "c5ce402f-790d-41ef-9102-31749052d34d",
+  "started_at": "2026-09-24T18:30:57.666057+06:00",
+  "ended_at": null,
+  "message_count": 8,
+  "messages": [
+    {
+      "role": "user",
+      "content": "the doctor's appointment got canceled",
+      "timestamp": "2026-09-24T18:30:57.666677+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I've checked your calendar and reminders, Sir. Your eye doctor appointment today at 7:00 PM is still showing on your calendar, and there aren't any specific reminders for it. Would you like me to remove the appointment from your calendar for you?",
+      "timestamp": "2026-09-24T18:31:06.524823+06:00"
+    },
+    {
+      "role": "user",
+      "content": "yes it's cancelled",
+      "timestamp": "2026-09-24T18:31:24.628536+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I've removed the eye doctor appointment from your calendar, Sir.",
+      "timestamp": "2026-09-24T18:31:31.263916+06:00"
+    },
+    {
+      "role": "user",
+      "content": "ok anything left to do?",
+      "timestamp": "2026-09-24T18:33:27.799180+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "You only have one remaining event on your calendar for today, Sir: your Biology class with Parvez Sir, which was scheduled from 4:00 to 5:00 PM. Otherwise, your schedule is clear.",
+      "timestamp": "2026-09-24T18:33:39.600371+06:00"
+    },
+    {
+      "role": "user",
+      "content": "how about reminderss?",
+      "timestamp": "2026-09-24T18:34:00.530974+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "You have a few reminders left for today and tomorrow, Sir:\n\n- **Finish math homework tonight** (due at 10:00 PM)\n- **Check for Avengers Endgame Encore tickets** (midnight and tomorrow morning)\n- **Implement a goals feature on zoe** (due September 23—looks like that one's past due)",
+      "timestamp": "2026-09-24T18:34:08.706808+06:00"
+    }
+  ]
+}

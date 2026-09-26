@@ -1,0 +1,48 @@
+{
+  "session_id": "bf2233de-8a3d-4d3f-b8fb-b70c68845e44",
+  "started_at": "2026-09-25T11:32:02.899875+06:00",
+  "ended_at": null,
+  "message_count": 8,
+  "messages": [
+    {
+      "role": "user",
+      "content": "open youtube",
+      "timestamp": "2026-09-25T11:32:02.904025+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I'm having trouble thinking that through right now — give me a moment and try again.",
+      "timestamp": "2026-09-25T11:32:04.196693+06:00"
+    },
+    {
+      "role": "user",
+      "content": "open youtube.com",
+      "timestamp": "2026-09-25T11:32:15.754944+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I'm having trouble thinking that through right now — give me a moment and try again.",
+      "timestamp": "2026-09-25T11:32:17.029598+06:00"
+    },
+    {
+      "role": "user",
+      "content": "hello",
+      "timestamp": "2026-09-25T11:32:21.021327+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello, Boss. What's on your mind?",
+      "timestamp": "2026-09-25T11:32:22.159154+06:00"
+    },
+    {
+      "role": "user",
+      "content": "open https://www.apple.com/",
+      "timestamp": "2026-09-25T11:32:43.203582+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I'm having trouble thinking that through right now — give me a moment and try again.",
+      "timestamp": "2026-09-25T11:32:45.495580+06:00"
+    }
+  ]
+}

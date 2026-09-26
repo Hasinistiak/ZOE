@@ -1,0 +1,33 @@
+{
+  "session_id": "ede53afc-1434-4bff-8847-0e68cb6c43d5",
+  "started_at": "2026-09-25T11:41:54.741280+06:00",
+  "ended_at": null,
+  "message_count": 5,
+  "messages": [
+    {
+      "role": "user",
+      "content": "open apple.com",
+      "timestamp": "2026-09-25T11:41:54.745109+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Opening Apple.",
+      "timestamp": "2026-09-25T11:41:56.652099+06:00"
+    },
+    {
+      "role": "user",
+      "content": "?",
+      "timestamp": "2026-09-25T11:42:10.649574+06:00"
+    },
+    {
+      "role": "user",
+      "content": "open youtube.com",
+      "timestamp": "2026-09-25T11:42:26.295832+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Opening YouTube.",
+      "timestamp": "2026-09-25T11:42:29.786460+06:00"
+    }
+  ]
+}

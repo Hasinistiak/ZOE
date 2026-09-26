@@ -1,0 +1,98 @@
+{
+  "session_id": "db3c6e24-5138-4ed7-9a3a-2b98c1aeeb72",
+  "started_at": "2026-09-25T10:10:19.502807+06:00",
+  "ended_at": null,
+  "message_count": 18,
+  "messages": [
+    {
+      "role": "user",
+      "content": "hello zoe",
+      "timestamp": "2026-09-25T10:10:19.503435+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello, Boss. How can I help you today?",
+      "timestamp": "2026-09-25T10:10:21.121138+06:00"
+    },
+    {
+      "role": "user",
+      "content": "what pc do  I  use?",
+      "timestamp": "2026-09-25T10:10:35.110859+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "You're currently running on an Intel Core i3 10th generation PC, Boss—though we've been looking at replacing it with that ThinkPad T480.",
+      "timestamp": "2026-09-25T10:10:41.703603+06:00"
+    },
+    {
+      "role": "user",
+      "content": "whats the ram situation on my pc?",
+      "timestamp": "2026-09-25T10:10:55.893254+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "You have 16GB of RAM on your current PC, Boss.",
+      "timestamp": "2026-09-25T10:11:02.102285+06:00"
+    },
+    {
+      "role": "user",
+      "content": "zoe remind me to drink coffee in 10 minutes",
+      "timestamp": "2026-09-25T10:11:19.745819+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Got it, Boss. I've set a reminder for you to drink coffee in 10 minutes.",
+      "timestamp": "2026-09-25T10:11:25.501438+06:00"
+    },
+    {
+      "role": "user",
+      "content": "ok hows my day looking?",
+      "timestamp": "2026-09-25T10:11:54.917606+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "You're currently in your Monoj Sir (Bangla) class, which runs until 11:00 AM, Boss. After that, your schedule is clear until 3:20 PM, when you have Avengers Endgame: Encore 2D. You also have a reminder to drink coffee coming up at 10:21 AM.",
+      "timestamp": "2026-09-25T10:12:00.758669+06:00"
+    },
+    {
+      "role": "user",
+      "content": "postpone the monoj sir class to exact time tomorrow",
+      "timestamp": "2026-09-25T10:12:29.079985+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Done, Boss. I've rescheduled your Monoj Sir (Bangla) class to 10:00 AM tomorrow, September 26.",
+      "timestamp": "2026-09-25T10:12:39.857099+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Time for that coffee reminder, Boss.",
+      "timestamp": "2026-09-25T10:20:40.336787+06:00"
+    },
+    {
+      "role": "user",
+      "content": "yep just got the coffee now imma ffinish that infinity war",
+      "timestamp": "2026-09-25T10:26:31.051821+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Enjoy Infinity War, Boss. Let me know if you need anything else before your movie later.",
+      "timestamp": "2026-09-25T10:26:32.512081+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Just a heads-up, Boss, your coffee task from 30 minutes ago is still marked as overdue. Enjoy it, or let me know if you want me to clear it.",
+      "timestamp": "2026-09-25T10:51:57.189816+06:00"
+    },
+    {
+      "role": "user",
+      "content": "Clear it",
+      "timestamp": "2026-09-25T10:52:11.714958+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "All taken care of, Boss. I've cleared that coffee reminder for you.",
+      "timestamp": "2026-09-25T10:52:18.581677+06:00"
+    }
+  ]
+}

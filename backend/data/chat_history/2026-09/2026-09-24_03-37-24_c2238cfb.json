@@ -1,0 +1,18 @@
+{
+  "session_id": "c2238cfb-4fb0-4096-87af-c1d18631476f",
+  "started_at": "2026-09-24T03:37:24.771807+06:00",
+  "ended_at": null,
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Explain how different operating systems manages memory",
+      "timestamp": "2026-09-24T03:37:24.773783+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I will prepare a detailed explanation of how different operating systems manage memory, Boss. Since this is a comprehensive technical reference, I am generating the complete guide for you now.",
+      "timestamp": "2026-09-24T03:37:26.911666+06:00"
+    }
+  ]
+}

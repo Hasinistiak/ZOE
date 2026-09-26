@@ -1,0 +1,58 @@
+{
+  "session_id": "03ecb9ce-3924-47e5-9677-7a1b0bd59938",
+  "started_at": "2026-09-25T12:41:57.308965+06:00",
+  "ended_at": null,
+  "message_count": 10,
+  "messages": [
+    {
+      "role": "user",
+      "content": "hello",
+      "timestamp": "2026-09-25T12:41:57.310622+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello, Sir.",
+      "timestamp": "2026-09-25T12:41:59.556329+06:00"
+    },
+    {
+      "role": "user",
+      "content": "whats up",
+      "timestamp": "2026-09-25T12:42:14.558518+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Not much, Sir. Standing by.",
+      "timestamp": "2026-09-25T12:42:16.228145+06:00"
+    },
+    {
+      "role": "user",
+      "content": "hello",
+      "timestamp": "2026-09-25T12:42:46.959213+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello again, Sir.",
+      "timestamp": "2026-09-25T12:42:48.547453+06:00"
+    },
+    {
+      "role": "user",
+      "content": "how's the weather",
+      "timestamp": "2026-09-25T12:42:58.397193+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "29 °C and sunny, Boss. Feels like 33 °C with a light southern breeze.",
+      "timestamp": "2026-09-25T12:43:03.950959+06:00"
+    },
+    {
+      "role": "user",
+      "content": "there is a over due task about goals implementation how about we reschedule that to tomorrow  midnight?",
+      "timestamp": "2026-09-25T12:43:30.410239+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Rescheduled, Boss.",
+      "timestamp": "2026-09-25T12:43:44.658675+06:00"
+    }
+  ]
+}

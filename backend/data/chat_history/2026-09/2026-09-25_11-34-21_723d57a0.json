@@ -1,0 +1,18 @@
+{
+  "session_id": "723d57a0-b3f3-4a94-9cb3-e285b0faf38e",
+  "started_at": "2026-09-25T11:34:21.137622+06:00",
+  "ended_at": null,
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "open apple.com",
+      "timestamp": "2026-09-25T11:34:21.138476+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Opening Apple.",
+      "timestamp": "2026-09-25T11:34:22.378955+06:00"
+    }
+  ]
+}

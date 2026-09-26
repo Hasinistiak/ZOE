@@ -1,0 +1,43 @@
+{
+  "session_id": "f3733ce9-a522-4e5e-92f0-12c38048c73e",
+  "started_at": "2026-09-24T23:19:00.560233+06:00",
+  "ended_at": "2026-09-25T01:51:16.682616+06:00",
+  "message_count": 7,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Can you check which seats i got?",
+      "timestamp": "2026-09-24T23:19:12.146283+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Boss, I found your confirmation email from Ki Chole for *Avengers Endgame: Encore 2D* at Bali Arcade. However, the email snippet doesn't list the specific seat numbers—it just notes that you can show the confirmation code at the counter or gate to collect your ticket.",
+      "timestamp": "2026-09-24T23:20:45.724333+06:00"
+    },
+    {
+      "role": "user",
+      "content": "Okay nws just set it to my cal… movie is 3hours long and starts and 3:20pm tomrw",
+      "timestamp": "2026-09-24T23:21:31.517630+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Done, Boss. I've added 'Avengers Endgame: Encore 2D' to your calendar for tomorrow, September 25, from 3:20 PM to 6:20 PM.",
+      "timestamp": "2026-09-24T23:21:59.717169+06:00"
+    },
+    {
+      "role": "user",
+      "content": "open youtube",
+      "timestamp": "2026-09-25T00:40:28.088637+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Opening YouTube for you, Boss.",
+      "timestamp": "2026-09-25T00:40:50.597839+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Boss, you just received security alerts and account recovery notifications from Google. Did you authorize a new sign-in?",
+      "timestamp": "2026-09-25T00:43:53.334847+06:00"
+    }
+  ]
+}

@@ -1,0 +1,68 @@
+{
+  "session_id": "4daedf58-6613-4f80-8daa-c53efa7259bf",
+  "started_at": "2026-09-24T15:18:22.267789+06:00",
+  "ended_at": null,
+  "message_count": 12,
+  "messages": [
+    {
+      "role": "user",
+      "content": "what pc do I use and what phone do i use?",
+      "timestamp": "2026-09-24T15:18:22.269073+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "You use a PC with 16GB of RAM and 256GB of storage, Boss, and your phone has 128GB of storage.",
+      "timestamp": "2026-09-24T15:18:28.859538+06:00"
+    },
+    {
+      "role": "user",
+      "content": "what phone",
+      "timestamp": "2026-09-24T15:18:41.593713+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "You use a phone with 128GB of storage, Boss.",
+      "timestamp": "2026-09-24T15:18:43.944603+06:00"
+    },
+    {
+      "role": "user",
+      "content": "phone name?",
+      "timestamp": "2026-09-24T15:18:51.490666+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "You use an iPhone 12, Boss.",
+      "timestamp": "2026-09-24T15:18:57.894303+06:00"
+    },
+    {
+      "role": "user",
+      "content": "whats my pc processor?",
+      "timestamp": "2026-09-24T15:19:06.845936+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I don't have your PC processor details in my memory yet, Boss. Want me to note it down once you check?",
+      "timestamp": "2026-09-24T15:19:13.757760+06:00"
+    },
+    {
+      "role": "user",
+      "content": "where is my phone battery health sitting at?",
+      "timestamp": "2026-09-24T15:19:22.923122+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "It's sitting at 85%, Boss.",
+      "timestamp": "2026-09-24T15:19:29.212672+06:00"
+    },
+    {
+      "role": "user",
+      "content": "my pc processor is i3 10th gen",
+      "timestamp": "2026-09-24T15:19:42.018655+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Got it, I've noted that down, Boss.",
+      "timestamp": "2026-09-24T15:19:49.504586+06:00"
+    }
+  ]
+}

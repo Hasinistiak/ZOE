@@ -1,0 +1,28 @@
+{
+  "session_id": "5e4c144c-beb4-442f-984e-7b779da928fb",
+  "started_at": "2026-09-24T18:39:18.192627+06:00",
+  "ended_at": null,
+  "message_count": 4,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Hey",
+      "timestamp": "2026-09-24T18:39:18.193750+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Good evening, Boss. How can I help you tonight?",
+      "timestamp": "2026-09-24T18:39:20.461150+06:00"
+    },
+    {
+      "role": "user",
+      "content": "How is the vision pro different from meta vr headsets",
+      "timestamp": "2026-09-24T18:39:39.480832+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "The Apple Vision Pro focuses on spatial computing and mixed reality, emphasizing high-resolution micro-OLED displays, eye and hand tracking without physical controllers, and deep integration with Apple's ecosystem. Meta headsets—like the Quest series—are primarily designed for standalone virtual and mixed reality gaming and social experiences, using traditional controllers, lower-cost LCD panels, and an open Android-based platform. Vision Pro is built for productivity and premium media consumption at a much higher price point, whereas Meta targets accessibility, gaming, and mainstream VR.",
+      "timestamp": "2026-09-24T18:39:42.377627+06:00"
+    }
+  ]
+}

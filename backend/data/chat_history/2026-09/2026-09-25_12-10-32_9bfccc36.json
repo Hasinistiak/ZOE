@@ -1,0 +1,23 @@
+{
+  "session_id": "9bfccc36-328c-4e33-ac8f-20cbe44102e3",
+  "started_at": "2026-09-25T12:10:32.568072+06:00",
+  "ended_at": null,
+  "message_count": 3,
+  "messages": [
+    {
+      "role": "user",
+      "content": "open youtube",
+      "timestamp": "2026-09-25T12:10:32.568774+06:00"
+    },
+    {
+      "role": "user",
+      "content": "open youtube",
+      "timestamp": "2026-09-25T12:10:38.982717+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Opening YouTube.",
+      "timestamp": "2026-09-25T12:10:40.241447+06:00"
+    }
+  ]
+}

@@ -1,0 +1,43 @@
+{
+  "session_id": "b233fb0b-44b4-4220-9ea5-01b0f8e2132f",
+  "started_at": "2026-09-25T09:20:48.358577+06:00",
+  "ended_at": null,
+  "message_count": 7,
+  "messages": [
+    {
+      "role": "user",
+      "content": "wake up",
+      "timestamp": "2026-09-25T09:20:48.359331+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Good morning, Boss. I'm awake and ready. What do you need?",
+      "timestamp": "2026-09-25T09:20:50.794804+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Just a heads-up, Boss—Monoj Sir (Bangla) is coming up in about 30 minutes at 10:00 AM.",
+      "timestamp": "2026-09-25T09:25:41.937507+06:00"
+    },
+    {
+      "role": "user",
+      "content": "yeah thanks.. also i wont be joining the ict class",
+      "timestamp": "2026-09-25T09:26:06.820402+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I've removed the ICT class from your calendar for today, Boss. There were no matching reminders found for it.",
+      "timestamp": "2026-09-25T09:26:32.886114+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Boss, just a reminder that Monoj Sir (Bangla) starts in about 15 minutes at 10:00 AM.",
+      "timestamp": "2026-09-25T09:45:37.583820+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Boss, Monoj Sir (Bangla) starts in just 4 minutes at 10:00 AM.",
+      "timestamp": "2026-09-25T09:55:38.300706+06:00"
+    }
+  ]
+}

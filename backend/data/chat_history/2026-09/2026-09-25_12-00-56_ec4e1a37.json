@@ -1,0 +1,38 @@
+{
+  "session_id": "ec4e1a37-325d-45fd-9494-9ba08c2538c5",
+  "started_at": "2026-09-25T12:00:56.926700+06:00",
+  "ended_at": null,
+  "message_count": 6,
+  "messages": [
+    {
+      "role": "user",
+      "content": "open youtube",
+      "timestamp": "2026-09-25T12:00:56.927943+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I'm having trouble thinking that through right now — give me a moment and try again.",
+      "timestamp": "2026-09-25T12:00:58.180317+06:00"
+    },
+    {
+      "role": "user",
+      "content": "open youtubeb",
+      "timestamp": "2026-09-25T12:01:09.160660+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Opening YouTube.",
+      "timestamp": "2026-09-25T12:01:12.796897+06:00"
+    },
+    {
+      "role": "user",
+      "content": "open youtube.com",
+      "timestamp": "2026-09-25T12:01:22.212594+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Opening YouTube.",
+      "timestamp": "2026-09-25T12:01:23.612512+06:00"
+    }
+  ]
+}

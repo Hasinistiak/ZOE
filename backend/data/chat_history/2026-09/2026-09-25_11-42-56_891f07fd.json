@@ -1,0 +1,18 @@
+{
+  "session_id": "891f07fd-9bac-464a-b930-1be484873b5e",
+  "started_at": "2026-09-25T11:42:56.403327+06:00",
+  "ended_at": null,
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "open youtube.com",
+      "timestamp": "2026-09-25T11:42:56.404505+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Opening YouTube for you, Boss.",
+      "timestamp": "2026-09-25T11:43:03.181141+06:00"
+    }
+  ]
+}

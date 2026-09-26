@@ -1,0 +1,23 @@
+{
+  "session_id": "44360054-91f6-40fc-bc98-deeea721bf3e",
+  "started_at": "2026-09-24T02:29:02.249187+06:00",
+  "ended_at": null,
+  "message_count": 3,
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey sup z you up?",
+      "timestamp": "2026-09-24T02:29:02.250432+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Always up, Boss. What's on your mind?",
+      "timestamp": "2026-09-24T02:29:03.992091+06:00"
+    },
+    {
+      "role": "user",
+      "content": "how does the ram system work in different operating systems like macos linux and windows? can you explain?",
+      "timestamp": "2026-09-24T02:29:43.376438+06:00"
+    }
+  ]
+}

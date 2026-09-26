@@ -1,0 +1,18 @@
+{
+  "session_id": "7981964c-24c0-4095-8921-2ad08577cb36",
+  "started_at": "2026-09-25T11:31:25.595651+06:00",
+  "ended_at": null,
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "open youtube",
+      "timestamp": "2026-09-25T11:31:25.596781+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I'm having trouble thinking that through right now — give me a moment and try again.",
+      "timestamp": "2026-09-25T11:31:27.395204+06:00"
+    }
+  ]
+}

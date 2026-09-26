@@ -1,0 +1,13 @@
+{
+  "session_id": "3c6f2a16-587c-45bd-ab47-09ff667586f9",
+  "started_at": "2026-09-24T02:38:08.377921+06:00",
+  "ended_at": null,
+  "message_count": 1,
+  "messages": [
+    {
+      "role": "user",
+      "content": "ow does the ram system work in different operating systems like macos linux and windows? can you explain?",
+      "timestamp": "2026-09-24T02:38:08.378756+06:00"
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "session_id": "9809f62f-a4d6-45bd-ab6c-40c95c410663",
+  "started_at": "2026-09-24T03:48:56.680780+06:00",
+  "ended_at": null,
+  "message_count": 6,
+  "messages": [
+    {
+      "role": "user",
+      "content": "I wanna upgrade my phone in like a year or so",
+      "timestamp": "2026-09-24T03:48:56.681984+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Wise move, Boss. The iPhone 12 has served you well, but a year from now it'll definitely be time for a proper step up. Want me to keep an eye on upcoming releases or what features to look out for?",
+      "timestamp": "2026-09-24T03:49:02.469225+06:00"
+    },
+    {
+      "role": "user",
+      "content": "suggest some options that are not too expensive and good to buy used in like a year",
+      "timestamp": "2026-09-24T03:49:52.406093+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I've sent the full explanation to Telegram, Boss.",
+      "timestamp": "2026-09-24T03:50:02.038928+06:00"
+    },
+    {
+      "role": "user",
+      "content": "Iphone 15 sounds good it has the dynamic island and type c",
+      "timestamp": "2026-09-24T03:51:17.749244+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I've sent the full explanation to Telegram, Boss.",
+      "timestamp": "2026-09-24T03:51:27.962417+06:00"
+    }
+  ]
+}

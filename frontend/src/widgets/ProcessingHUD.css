@@ -1,0 +1,1545 @@
+/* ============================================================
+   PROCESSING HUD
+   ZOE — SINGLE BLUE ACCENT SYSTEM
+============================================================ */
+
+
+/* ============================================================
+   ROOT
+============================================================ */
+
+.processing-hud {
+    position: fixed;
+
+    left: 30px;
+    top: 50%;
+
+    width: 320px;
+    max-width: calc(100vw - 60px);
+
+    z-index: 140;
+
+    pointer-events: none;
+
+    transform: translateY(-50%);
+
+    /* ========================================================
+       ZOE PRIMARY ACCENT
+    ======================================================== */
+
+    --hud-accent: var(--blue);
+    --hud-glow: var(--blue-glow);
+
+    font-family: var(--font-mono);
+
+    overflow: visible;
+
+    animation:
+        processing-hud-enter
+        420ms
+        cubic-bezier(.16, 1, .3, 1)
+        both;
+}
+
+
+/* ============================================================
+   MAIN PANEL
+============================================================ */
+
+.processing-hud__rail {
+    position: relative;
+
+    width: 100%;
+
+    padding:
+        17px
+        18px
+        15px;
+
+    background:
+        linear-gradient(
+            135deg,
+            rgba(14, 19, 26, 0.95),
+            rgba(6, 8, 11, 0.92)
+        );
+
+    border:
+        1px solid
+        color-mix(
+            in srgb,
+            var(--hud-accent) 25%,
+            transparent
+        );
+
+    box-shadow:
+        0 0 30px
+        color-mix(
+            in srgb,
+            var(--hud-glow) 18%,
+            transparent
+        ),
+
+        inset 0 0 28px
+        color-mix(
+            in srgb,
+            var(--hud-accent) 2.5%,
+            transparent
+        );
+
+    backdrop-filter: blur(12px);
+}
+
+
+/* ============================================================
+   LEFT ENERGY RAIL
+============================================================ */
+
+.processing-hud__rail::before {
+    content: "";
+
+    position: absolute;
+
+    left: -1px;
+
+    top: 13px;
+    bottom: 13px;
+
+    width: 2px;
+
+    background: var(--hud-accent);
+
+    box-shadow:
+        0 0 8px var(--hud-glow),
+        0 0 18px var(--hud-glow),
+        0 0 30px
+        color-mix(
+            in srgb,
+            var(--hud-glow) 45%,
+            transparent
+        );
+
+    animation:
+        processing-line-pulse
+        1.8s
+        ease-in-out
+        infinite;
+}
+
+
+/* ============================================================
+   TOP LEFT CORNER
+============================================================ */
+
+.processing-hud__rail::after {
+    content: "";
+
+    position: absolute;
+
+    left: 0;
+    top: 0;
+
+    width: 16px;
+    height: 16px;
+
+    border-top:
+        1px solid
+        var(--hud-accent);
+
+    border-left:
+        1px solid
+        var(--hud-accent);
+
+    opacity: 0.75;
+
+    filter:
+        drop-shadow(
+            0 0 5px
+            var(--hud-glow)
+        );
+}
+
+
+/* ============================================================
+   HEADER
+============================================================ */
+
+.processing-hud__header {
+    display: flex;
+
+    align-items: center;
+
+    justify-content: space-between;
+
+    gap: 12px;
+
+    padding-bottom: 11px;
+
+    border-bottom:
+        1px solid
+        rgba(229, 231, 235, 0.06);
+}
+
+
+/* ============================================================
+   IDENTITY
+============================================================ */
+
+.processing-hud__identity {
+    display: flex;
+
+    align-items: center;
+
+    min-width: 0;
+
+    gap: 8px;
+}
+
+
+.processing-hud__indicator {
+    width: 6px;
+    height: 6px;
+
+    flex-shrink: 0;
+
+    border-radius: 50%;
+
+    background: var(--hud-accent);
+
+    box-shadow:
+        0 0 7px var(--hud-glow),
+        0 0 15px var(--hud-glow);
+
+    animation:
+        processing-indicator
+        1.1s
+        ease-in-out
+        infinite;
+}
+
+
+.processing-hud__system {
+    font-family: var(--font-display);
+
+    font-size: 10px;
+
+    font-weight: 700;
+
+    letter-spacing: 2.8px;
+
+    color: var(--cream);
+
+    text-shadow:
+        0 0 12px
+        color-mix(
+            in srgb,
+            var(--hud-glow) 25%,
+            transparent
+        );
+}
+
+
+.processing-hud__separator {
+    font-size: 10px;
+
+    color: var(--cream-faint);
+}
+
+
+.processing-hud__module {
+    max-width: 145px;
+
+    overflow: hidden;
+
+    white-space: nowrap;
+
+    text-overflow: ellipsis;
+
+    font-size: 7.5px;
+
+    letter-spacing: 1.2px;
+
+    color: var(--cream-faint);
+}
+
+
+/* ============================================================
+   STATE
+============================================================ */
+
+.processing-hud__state {
+    display: flex;
+
+    align-items: center;
+
+    gap: 6px;
+
+    flex-shrink: 0;
+
+    font-size: 6.5px;
+
+    letter-spacing: 1.3px;
+
+    color: var(--hud-accent);
+
+    white-space: nowrap;
+}
+
+
+.processing-hud__state i {
+    width: 5px;
+    height: 5px;
+
+    flex-shrink: 0;
+
+    border-radius: 50%;
+
+    background: var(--hud-accent);
+
+    box-shadow:
+        0 0 6px
+        var(--hud-glow);
+
+    animation:
+        processing-state-pulse
+        1.4s
+        ease-in-out
+        infinite;
+}
+
+
+/* ============================================================
+   MAIN CONTENT
+============================================================ */
+
+.processing-hud__main {
+    display: grid;
+
+    grid-template-columns:
+        minmax(0, 1fr)
+        auto;
+
+    gap: 18px;
+
+    padding:
+        15px 0 13px;
+}
+
+
+/* ============================================================
+   OPERATION
+============================================================ */
+
+.processing-hud__operation {
+    min-width: 0;
+}
+
+
+.processing-hud__label {
+    display: block;
+
+    margin-bottom: 6px;
+
+    font-size: 6.5px;
+
+    letter-spacing: 1.5px;
+
+    color: var(--cream-faint);
+
+    text-transform: uppercase;
+}
+
+
+.processing-hud__operation-value {
+    width: 100%;
+
+    overflow: hidden;
+
+    white-space: nowrap;
+
+    text-overflow: ellipsis;
+
+    font-family: var(--font-display);
+
+    font-size: 10px;
+
+    font-weight: 600;
+
+    line-height: 1.35;
+
+    letter-spacing: 1px;
+
+    color: var(--cream);
+
+    text-shadow:
+        0 0 12px
+        color-mix(
+            in srgb,
+            var(--hud-glow) 35%,
+            transparent
+        );
+}
+
+
+.processing-hud__detail {
+    width: 100%;
+
+    margin-top: 6px;
+
+    overflow: hidden;
+
+    white-space: nowrap;
+
+    text-overflow: ellipsis;
+
+    font-size: 7px;
+
+    line-height: 1.4;
+
+    letter-spacing: 0.55px;
+
+    color: var(--cream-faint);
+}
+
+
+/* ============================================================
+   ELAPSED
+============================================================ */
+
+.processing-hud__elapsed {
+    display: flex;
+
+    flex-direction: column;
+
+    align-items: flex-end;
+
+    justify-content: center;
+
+    min-width: 54px;
+}
+
+
+.processing-hud__elapsed .processing-hud__label {
+    margin-bottom: 5px;
+
+    text-align: right;
+}
+
+
+.processing-hud__elapsed strong {
+    font-family: var(--font-display);
+
+    font-size: 17px;
+
+    font-weight: 500;
+
+    line-height: 1;
+
+    letter-spacing: 1px;
+
+    color: var(--hud-accent);
+
+    text-shadow:
+        0 0 10px
+        var(--hud-glow),
+
+        0 0 20px
+        color-mix(
+            in srgb,
+            var(--hud-glow) 35%,
+            transparent
+        );
+}
+
+
+.processing-hud__elapsed small {
+    margin-top: 4px;
+
+    font-size: 5.5px;
+
+    letter-spacing: 1.6px;
+
+    color: var(--cream-faint);
+}
+
+
+/* ============================================================
+   AGENTS SECTION
+============================================================ */
+
+.processing-hud__agents {
+    padding:
+        12px 0 11px;
+
+    border-top:
+        1px solid
+        rgba(229, 231, 235, 0.06);
+}
+
+
+/* ============================================================
+   AGENTS HEADER
+============================================================ */
+
+.processing-hud__agents-header {
+    display: flex;
+
+    align-items: center;
+
+    justify-content: space-between;
+
+    gap: 10px;
+
+    margin-bottom: 9px;
+
+    font-size: 6.5px;
+
+    letter-spacing: 1.5px;
+
+    color: var(--cream-faint);
+}
+
+
+.processing-hud__agents-header strong {
+    font-family: var(--font-display);
+
+    font-size: 9px;
+
+    font-weight: 500;
+
+    letter-spacing: 1px;
+
+    color: var(--hud-accent);
+
+    text-shadow:
+        0 0 8px
+        var(--hud-glow);
+}
+
+
+/* ============================================================
+   AGENT LIST
+============================================================ */
+
+.processing-hud__agent-list {
+    display: flex;
+
+    flex-direction: column;
+
+    gap: 7px;
+
+    max-height: 145px;
+
+    overflow-y: auto;
+
+    scrollbar-width: thin;
+
+    scrollbar-color:
+        color-mix(
+            in srgb,
+            var(--hud-accent) 35%,
+            transparent
+        )
+        transparent;
+}
+
+
+.processing-hud__agent-list::-webkit-scrollbar {
+    width: 2px;
+}
+
+
+.processing-hud__agent-list::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+
+.processing-hud__agent-list::-webkit-scrollbar-thumb {
+    background:
+        color-mix(
+            in srgb,
+            var(--hud-accent) 35%,
+            transparent
+        );
+
+    border-radius: 10px;
+}
+
+
+/* ============================================================
+   AGENT CARD
+============================================================ */
+
+.processing-hud__agent {
+    position: relative;
+
+    min-width: 0;
+
+    padding:
+        7px
+        0
+        7px
+        11px;
+
+    background:
+        linear-gradient(
+            90deg,
+            color-mix(
+                in srgb,
+                var(--hud-accent) 5%,
+                transparent
+            ),
+            transparent 75%
+        );
+
+    border-bottom:
+        1px solid
+        rgba(229, 231, 235, 0.035);
+
+    overflow: hidden;
+}
+
+
+.processing-hud__agent:last-child {
+    border-bottom: none;
+}
+
+
+/* ============================================================
+   AGENT LEFT SIGNAL
+============================================================ */
+
+.processing-hud__agent::before {
+    content: "";
+
+    position: absolute;
+
+    left: 0;
+    top: 2px;
+
+    width: 1px;
+
+    height:
+        calc(100% - 4px);
+
+    background:
+        color-mix(
+            in srgb,
+            var(--hud-accent) 45%,
+            transparent
+        );
+
+    box-shadow:
+        0 0 7px
+        color-mix(
+            in srgb,
+            var(--hud-glow) 35%,
+            transparent
+        );
+}
+
+
+/* ============================================================
+   AGENT SCAN LINE
+============================================================ */
+
+.processing-hud__agent::after {
+    content: "";
+
+    position: absolute;
+
+    left: -40%;
+
+    bottom: 0;
+
+    width: 40%;
+
+    height: 1px;
+
+    background:
+        linear-gradient(
+            90deg,
+            transparent,
+            var(--hud-accent),
+            transparent
+        );
+
+    opacity: 0.5;
+
+    animation:
+        processing-agent-scan
+        2.8s
+        linear
+        infinite;
+}
+
+
+/* ============================================================
+   AGENT TOP
+============================================================ */
+
+.processing-hud__agent-top {
+    display: flex;
+
+    align-items: center;
+
+    justify-content: space-between;
+
+    gap: 10px;
+
+    min-width: 0;
+}
+
+
+/* ============================================================
+   AGENT NAME
+============================================================ */
+
+.processing-hud__agent-name {
+    display: flex;
+
+    align-items: center;
+
+    gap: 7px;
+
+    min-width: 0;
+
+    overflow: hidden;
+
+    white-space: nowrap;
+
+    text-overflow: ellipsis;
+
+    font-family: var(--font-display);
+
+    font-size: 7px;
+
+    letter-spacing: 1px;
+
+    color: var(--cream);
+}
+
+
+.processing-hud__agent-dot {
+    width: 5px;
+    height: 5px;
+
+    flex-shrink: 0;
+
+    border-radius: 50%;
+
+    background: var(--hud-accent);
+
+    box-shadow:
+        0 0 6px var(--hud-glow),
+
+        0 0 10px
+        color-mix(
+            in srgb,
+            var(--hud-glow) 40%,
+            transparent
+        );
+
+    animation:
+        processing-agent-pulse
+        1s
+        ease-in-out
+        infinite;
+}
+
+
+/* ============================================================
+   AGENT STATE
+============================================================ */
+
+.processing-hud__agent-state {
+    flex-shrink: 0;
+
+    font-size: 5px;
+
+    letter-spacing: 1px;
+
+    color: var(--hud-accent);
+
+    white-space: nowrap;
+}
+
+
+/* ============================================================
+   AGENT OPERATION
+============================================================ */
+
+.processing-hud__agent-operation {
+    margin-top: 4px;
+
+    padding-left: 12px;
+
+    overflow: hidden;
+
+    white-space: nowrap;
+
+    text-overflow: ellipsis;
+
+    font-size: 5.5px;
+
+    line-height: 1.35;
+
+    letter-spacing: 0.75px;
+
+    color: var(--hud-accent);
+
+    opacity: 0.8;
+}
+
+
+/* ============================================================
+   AGENT DETAIL
+============================================================ */
+
+.processing-hud__agent-detail {
+    margin-top: 3px;
+
+    padding-left: 12px;
+
+    overflow: hidden;
+
+    white-space: nowrap;
+
+    text-overflow: ellipsis;
+
+    font-size: 6px;
+
+    line-height: 1.4;
+
+    letter-spacing: 0.35px;
+
+    color: var(--cream-faint);
+}
+
+
+/* ============================================================
+   ACTIVE AGENT
+============================================================ */
+
+.processing-hud__agent.is-active {
+    background:
+        linear-gradient(
+            90deg,
+            color-mix(
+                in srgb,
+                var(--hud-accent) 7%,
+                transparent
+            ),
+            transparent 80%
+        );
+}
+
+
+.processing-hud__agent.is-active
+.processing-hud__agent-dot {
+    animation:
+        processing-agent-pulse
+        1s
+        ease-in-out
+        infinite;
+}
+
+
+/* ============================================================
+   COMPLETED AGENT
+============================================================ */
+
+.processing-hud__agent.is-completed {
+    opacity: 0.72;
+}
+
+
+.processing-hud__agent.is-completed
+.processing-hud__agent-dot {
+    animation: none;
+
+    opacity: 0.7;
+}
+
+
+/* ============================================================
+   FAILED AGENT
+============================================================ */
+
+.processing-hud__agent.is-failed {
+    opacity: 0.95;
+}
+
+
+.processing-hud__agent.is-failed
+.processing-hud__agent-dot {
+    background: var(--hud-accent);
+
+    box-shadow:
+        0 0 7px
+        var(--hud-glow);
+
+    animation: none;
+}
+
+
+/* ============================================================
+   EMPTY AGENT STATE
+============================================================ */
+
+.processing-hud__agent-empty {
+    display: flex;
+
+    align-items: center;
+
+    gap: 7px;
+
+    padding:
+        11px 0;
+
+    border-top:
+        1px solid
+        rgba(229, 231, 235, 0.06);
+
+    font-size: 6px;
+
+    letter-spacing: 1px;
+
+    color: var(--cream-faint);
+}
+
+
+.processing-hud__agent-empty-dot {
+    width: 5px;
+    height: 5px;
+
+    flex-shrink: 0;
+
+    border-radius: 50%;
+
+    background: var(--hud-accent);
+
+    box-shadow:
+        0 0 7px
+        var(--hud-glow);
+
+    animation:
+        processing-indicator
+        1s
+        ease-in-out
+        infinite;
+}
+
+
+/* ============================================================
+   PIPELINE
+============================================================ */
+
+.processing-hud__pipeline {
+    display: flex;
+
+    align-items: center;
+
+    gap: 7px;
+
+    padding-top: 11px;
+
+    border-top:
+        1px solid
+        rgba(229, 231, 235, 0.06);
+
+    overflow: hidden;
+}
+
+
+.processing-hud__pipeline-item {
+    flex-shrink: 0;
+
+    font-size: 6px;
+
+    letter-spacing: 1.1px;
+
+    color: var(--cream-faint);
+
+    transition:
+        color 180ms ease,
+        text-shadow 180ms ease;
+}
+
+
+.processing-hud__pipeline-item.active {
+    color: var(--hud-accent);
+
+    text-shadow:
+        0 0 7px
+        var(--hud-glow),
+
+        0 0 12px
+        color-mix(
+            in srgb,
+            var(--hud-glow) 30%,
+            transparent
+        );
+}
+
+
+.processing-hud__pipeline i {
+    position: relative;
+
+    width: 18px;
+    height: 1px;
+
+    flex-shrink: 0;
+
+    background:
+        rgba(229, 231, 235, 0.10);
+}
+
+
+.processing-hud__pipeline i::after {
+    content: "";
+
+    position: absolute;
+
+    right: 0;
+    top: -1px;
+
+    width: 3px;
+    height: 3px;
+
+    border-radius: 50%;
+
+    background: var(--hud-accent);
+
+    box-shadow:
+        0 0 5px
+        var(--hud-glow);
+
+    opacity: 0.55;
+}
+
+
+/* ============================================================
+   ZOE ACCENT — ALL HUD MODES
+============================================================ */
+
+/*
+   Every HUD mode intentionally uses the same
+   ZOE primary blue.
+
+   State differences are communicated through:
+   - animation
+   - opacity
+   - labels
+   - layout
+
+   NOT through different accent colors.
+*/
+
+
+/* ============================================================
+   BACKGROUND AGENT
+============================================================ */
+
+.processing-hud--agent {
+    --hud-accent: var(--blue);
+    --hud-glow: var(--blue-glow);
+}
+
+
+/* ============================================================
+   RESEARCH
+============================================================ */
+
+.processing-hud--research {
+    --hud-accent: var(--blue);
+    --hud-glow: var(--blue-glow);
+}
+
+
+/* ============================================================
+   TOOL
+============================================================ */
+
+.processing-hud--tool {
+    --hud-accent: var(--blue);
+    --hud-glow: var(--blue-glow);
+}
+
+
+/* ============================================================
+   EXECUTING
+============================================================ */
+
+.processing-hud--executing {
+    --hud-accent: var(--blue);
+    --hud-glow: var(--blue-glow);
+}
+
+
+/* ============================================================
+   ERROR
+============================================================ */
+
+.processing-hud--error {
+    --hud-accent: var(--blue);
+    --hud-glow: var(--blue-glow);
+}
+
+
+.processing-hud--error
+.processing-hud__indicator,
+
+.processing-hud--error
+.processing-hud__state i,
+
+.processing-hud--error
+.processing-hud__agent-dot {
+    animation: none;
+}
+
+
+/* ============================================================
+   SUCCESS
+============================================================ */
+
+.processing-hud--success {
+    --hud-accent: var(--blue);
+    --hud-glow: var(--blue-glow);
+}
+
+
+/* ============================================================
+   HUD ENTER
+============================================================ */
+
+@keyframes processing-hud-enter {
+
+    from {
+        opacity: 0;
+
+        transform:
+            translateY(-50%)
+            translateX(-22px)
+            scale(0.98);
+    }
+
+    to {
+        opacity: 1;
+
+        transform:
+            translateY(-50%)
+            translateX(0)
+            scale(1);
+    }
+}
+
+
+/* ============================================================
+   INDICATOR
+============================================================ */
+
+@keyframes processing-indicator {
+
+    0%,
+    100% {
+        opacity: 0.35;
+
+        transform: scale(0.8);
+    }
+
+    50% {
+        opacity: 1;
+
+        transform: scale(1.15);
+    }
+}
+
+
+/* ============================================================
+   STATE PULSE
+============================================================ */
+
+@keyframes processing-state-pulse {
+
+    0%,
+    100% {
+        opacity: 0.35;
+    }
+
+    50% {
+        opacity: 1;
+    }
+}
+
+
+/* ============================================================
+   ENERGY LINE
+============================================================ */
+
+@keyframes processing-line-pulse {
+
+    0%,
+    100% {
+        opacity: 0.4;
+    }
+
+    50% {
+        opacity: 1;
+    }
+}
+
+
+/* ============================================================
+   AGENT PULSE
+============================================================ */
+
+@keyframes processing-agent-pulse {
+
+    0%,
+    100% {
+        opacity: 0.35;
+
+        transform: scale(0.8);
+    }
+
+    50% {
+        opacity: 1;
+
+        transform: scale(1.15);
+    }
+}
+
+
+/* ============================================================
+   AGENT SCAN
+============================================================ */
+
+@keyframes processing-agent-scan {
+
+    0% {
+        left: -40%;
+
+        opacity: 0;
+    }
+
+    15% {
+        opacity: 0.45;
+    }
+
+    65% {
+        opacity: 0.35;
+    }
+
+    100% {
+        left: 110%;
+
+        opacity: 0;
+    }
+}
+
+
+/* ============================================================
+   TABLET
+============================================================ */
+
+@media (max-width: 1000px) {
+
+    .processing-hud {
+        left: 22px;
+
+        width: 290px;
+
+        max-width:
+            calc(100vw - 44px);
+    }
+
+
+    .processing-hud__rail {
+        padding:
+            15px
+            16px
+            13px;
+    }
+
+
+    .processing-hud__module {
+        max-width: 120px;
+    }
+
+
+    .processing-hud__agent-list {
+        max-height: 135px;
+    }
+}
+
+
+/* ============================================================
+   SMALL TABLET
+============================================================ */
+
+@media (max-width: 760px) {
+
+    .processing-hud {
+        left: 18px;
+
+        width: 270px;
+
+        max-width:
+            calc(100vw - 36px);
+    }
+
+
+    .processing-hud__main {
+        gap: 14px;
+    }
+
+
+    .processing-hud__pipeline {
+        gap: 5px;
+    }
+
+
+    .processing-hud__pipeline i {
+        width: 13px;
+    }
+
+
+    .processing-hud__agent-list {
+        max-height: 125px;
+    }
+}
+
+
+/* ============================================================
+   MOBILE
+============================================================ */
+
+@media (max-width: 600px) {
+
+    .processing-hud {
+        left: 14px;
+
+        top: auto;
+
+        bottom: 105px;
+
+        width: 245px;
+
+        max-width:
+            calc(100vw - 28px);
+
+        transform: none;
+    }
+
+
+    .processing-hud__rail {
+        padding:
+            13px
+            14px
+            11px;
+    }
+
+
+    .processing-hud__header {
+        padding-bottom: 9px;
+    }
+
+
+    .processing-hud__system {
+        font-size: 9px;
+
+        letter-spacing: 2.3px;
+    }
+
+
+    .processing-hud__module {
+        max-width: 90px;
+
+        font-size: 6.5px;
+    }
+
+
+    .processing-hud__state {
+        font-size: 5.5px;
+    }
+
+
+    .processing-hud__main {
+        padding:
+            12px
+            0
+            10px;
+
+        gap: 10px;
+    }
+
+
+    .processing-hud__operation-value {
+        font-size: 8.5px;
+    }
+
+
+    .processing-hud__detail {
+        font-size: 6px;
+    }
+
+
+    .processing-hud__elapsed strong {
+        font-size: 15px;
+    }
+
+
+    .processing-hud__agents {
+        padding:
+            10px 0 9px;
+    }
+
+
+    .processing-hud__agents-header {
+        margin-bottom: 7px;
+    }
+
+
+    .processing-hud__agent-list {
+        max-height: 110px;
+    }
+
+
+    .processing-hud__agent {
+        padding:
+            6px
+            0
+            6px
+            9px;
+    }
+
+
+    .processing-hud__agent-name {
+        font-size: 6.5px;
+    }
+
+
+    .processing-hud__agent-state {
+        font-size: 4.5px;
+    }
+
+
+    .processing-hud__agent-operation {
+        font-size: 5px;
+
+        padding-left: 11px;
+    }
+
+
+    .processing-hud__agent-detail {
+        font-size: 5.5px;
+
+        padding-left: 11px;
+    }
+
+
+    .processing-hud__pipeline {
+        gap: 4px;
+
+        padding-top: 9px;
+    }
+
+
+    .processing-hud__pipeline-item {
+        font-size: 5px;
+
+        letter-spacing: 0.8px;
+    }
+
+
+    .processing-hud__pipeline i {
+        width: 9px;
+    }
+
+
+    @keyframes processing-hud-enter {
+
+        from {
+            opacity: 0;
+
+            transform:
+                translateX(-18px)
+                scale(0.98);
+        }
+
+        to {
+            opacity: 1;
+
+            transform:
+                translateX(0)
+                scale(1);
+        }
+
+    }
+}
+
+
+/* ============================================================
+   VERY SMALL MOBILE
+============================================================ */
+
+@media (max-width: 420px) {
+
+    .processing-hud {
+        left: 10px;
+
+        width: 225px;
+
+        max-width:
+            calc(100vw - 20px);
+
+        bottom: 100px;
+    }
+
+
+    .processing-hud__rail {
+        padding:
+            11px
+            12px
+            10px;
+    }
+
+
+    .processing-hud__module {
+        display: none;
+    }
+
+
+    .processing-hud__agent-list {
+        max-height: 95px;
+    }
+
+
+    .processing-hud__pipeline-item {
+        font-size: 4.5px;
+    }
+
+
+    .processing-hud__pipeline i {
+        width: 7px;
+    }
+}
+
+
+/* ============================================================
+   REDUCED MOTION
+============================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+
+    .processing-hud,
+    .processing-hud *,
+    .processing-hud::before,
+    .processing-hud::after {
+        animation-duration: 0.01ms !important;
+
+        animation-iteration-count: 1 !important;
+
+        transition-duration: 0.01ms !important;
+    }
+}

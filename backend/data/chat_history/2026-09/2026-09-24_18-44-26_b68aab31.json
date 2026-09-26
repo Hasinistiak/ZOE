@@ -1,0 +1,18 @@
+{
+  "session_id": "b68aab31-7b3a-4fe3-b720-570023db5281",
+  "started_at": "2026-09-24T18:44:26.487706+06:00",
+  "ended_at": null,
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "How different is ai memory from human memory?",
+      "timestamp": "2026-09-24T18:44:26.490960+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "AI memory and human memory operate on fundamentally different principles, Boss. \n\nHuman memory is associative, emotional, and constantly reconstructive. We remember things through context, feelings, and fading neural pathways, often distorting details over time while retaining the core meaning.\n\nAI memory, conversely, is literal, precise, and structural. It relies on mathematical representations—vectors and embeddings—stored in vector databases or context windows. It doesn't 'experience' or 'forget' organically; rather, it retrieves exact data points or computes semantic similarity based on mathematical distance.\n\nIn short: humans remember by feeling and reconstructing; AI remembers by indexing and calculating.",
+      "timestamp": "2026-09-24T18:45:48.491191+06:00"
+    }
+  ]
+}

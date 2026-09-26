@@ -1,0 +1,38 @@
+{
+  "session_id": "3a722ba7-f242-49f3-bdaf-a0114993347c",
+  "started_at": "2026-09-24T03:46:16.476388+06:00",
+  "ended_at": null,
+  "message_count": 6,
+  "messages": [
+    {
+      "role": "user",
+      "content": "hellow",
+      "timestamp": "2026-09-24T03:46:16.477071+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello, Boss. What do you need?",
+      "timestamp": "2026-09-24T03:46:18.281777+06:00"
+    },
+    {
+      "role": "user",
+      "content": "play smth",
+      "timestamp": "2026-09-24T03:46:25.680577+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I'll put on some music for you, Boss.",
+      "timestamp": "2026-09-24T03:46:27.400054+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Now playing \"Something Good\" by alt-J, Boss.",
+      "timestamp": "2026-09-24T03:46:34.228545+06:00"
+    },
+    {
+      "role": "user",
+      "content": "okay how does variable apetures work?",
+      "timestamp": "2026-09-24T03:47:00.107626+06:00"
+    }
+  ]
+}

@@ -1,0 +1,28 @@
+{
+  "session_id": "a43948f8-ea51-4554-b11e-2e968428a509",
+  "started_at": "2026-09-25T01:51:16.683279+06:00",
+  "ended_at": "2026-09-25T03:11:44.721051+06:00",
+  "message_count": 4,
+  "messages": [
+    {
+      "role": "user",
+      "content": "zoe you up?",
+      "timestamp": "2026-09-25T01:51:16.683632+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Always, Boss. What do you need?",
+      "timestamp": "2026-09-25T01:51:18.081484+06:00"
+    },
+    {
+      "role": "user",
+      "content": "nothing just checking",
+      "timestamp": "2026-09-25T01:51:28.933584+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Good to know. I'm right here if you need anything, Boss.",
+      "timestamp": "2026-09-25T01:51:30.375270+06:00"
+    }
+  ]
+}

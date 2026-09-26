@@ -1,0 +1,17 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+
+  "identifier": "default",
+
+  "description": "Default capabilities for ZOE",
+
+  "windows": [
+    "main"
+  ],
+
+  "permissions": [
+    "core:default",
+    "opener:default",
+    "core:webview:allow-create-webview-window"
+  ]
+}

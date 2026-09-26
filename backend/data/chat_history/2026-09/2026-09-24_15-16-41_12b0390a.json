@@ -1,0 +1,28 @@
+{
+  "session_id": "12b0390a-02c4-4738-9ddf-af4885e65477",
+  "started_at": "2026-09-24T15:16:41.603530+06:00",
+  "ended_at": null,
+  "message_count": 4,
+  "messages": [
+    {
+      "role": "user",
+      "content": "what phone do I use?",
+      "timestamp": "2026-09-24T15:16:41.604698+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "You're using an iPhone 12, Sir. 128GB storage with 84% battery health.",
+      "timestamp": "2026-09-24T15:16:45.091794+06:00"
+    },
+    {
+      "role": "user",
+      "content": "it's acctually 85",
+      "timestamp": "2026-09-24T15:17:00.944138+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Noted, Boss. I've updated your battery health to 85%.",
+      "timestamp": "2026-09-24T15:17:04.588002+06:00"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "session_id": "1436cdd6-0a1e-4ee3-ac6e-5d557dfbc36e",
+  "started_at": "2026-09-24T03:26:36.794743+06:00",
+  "ended_at": null,
+  "message_count": 1,
+  "messages": [
+    {
+      "role": "user",
+      "content": "explain how ram works on windows linux and macos",
+      "timestamp": "2026-09-24T03:26:36.795485+06:00"
+    }
+  ]
+}

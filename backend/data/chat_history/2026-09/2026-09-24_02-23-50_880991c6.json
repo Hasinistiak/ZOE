@@ -1,0 +1,13 @@
+{
+  "session_id": "880991c6-477f-4769-943e-e58b9bc031f7",
+  "started_at": "2026-09-24T02:23:50.108909+06:00",
+  "ended_at": null,
+  "message_count": 1,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Explain in detail how an operating system works, from BIOS/UEFI through the bootloader and kernel initialization to memory management, processes, and drivers.",
+      "timestamp": "2026-09-24T02:23:50.109610+06:00"
+    }
+  ]
+}

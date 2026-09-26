@@ -1,0 +1,38 @@
+{
+  "session_id": "17acb6d3-9ded-4e6e-be12-0e986e1a184f",
+  "started_at": "2026-09-24T22:11:40.359571+06:00",
+  "ended_at": "2026-09-24T23:19:00.559525+06:00",
+  "message_count": 6,
+  "messages": [
+    {
+      "role": "user",
+      "content": "wake up daddy's home",
+      "timestamp": "2026-09-24T22:11:40.360355+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Welcome home, Boss. I'm right here.",
+      "timestamp": "2026-09-24T22:12:39.176151+06:00"
+    },
+    {
+      "role": "user",
+      "content": "how's the weather",
+      "timestamp": "2026-09-24T22:13:20.185694+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "It's currently 27 °C and partly cloudy in Chittagong, Boss, though it feels closer to 31 °C with high humidity. Winds are coming from the SSE at around 31 kph, and no rain is expected right now.",
+      "timestamp": "2026-09-24T22:15:45.009059+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Boss, just a heads-up that disk usage has reached 92.9%. You might want to clear some space soon.",
+      "timestamp": "2026-09-24T22:24:13.758389+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Boss, your ticket for Avengers Endgame: Encore 2D at Bali Arcade is confirmed.",
+      "timestamp": "2026-09-24T22:45:06.653430+06:00"
+    }
+  ]
+}

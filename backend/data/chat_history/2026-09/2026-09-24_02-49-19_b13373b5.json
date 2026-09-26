@@ -1,0 +1,13 @@
+{
+  "session_id": "b13373b5-202a-4d41-a3fe-75414d5107f2",
+  "started_at": "2026-09-24T02:49:19.218331+06:00",
+  "ended_at": null,
+  "message_count": 1,
+  "messages": [
+    {
+      "role": "user",
+      "content": "send me hi on telegram",
+      "timestamp": "2026-09-24T02:49:19.219575+06:00"
+    }
+  ]
+}

@@ -1,0 +1,18 @@
+{
+  "session_id": "63440576-efcb-42a9-8705-53108f80ae19",
+  "started_at": "2026-09-25T11:41:20.721796+06:00",
+  "ended_at": null,
+  "message_count": 2,
+  "messages": [
+    {
+      "role": "user",
+      "content": "open apple.com",
+      "timestamp": "2026-09-25T11:41:20.724267+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I'm having trouble thinking that through right now — give me a moment and try again.",
+      "timestamp": "2026-09-25T11:41:22.089550+06:00"
+    }
+  ]
+}

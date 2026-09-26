@@ -1,0 +1,33 @@
+{
+  "session_id": "c287f6c3-0a61-4600-979a-dd2701a66c89",
+  "started_at": "2026-09-25T03:11:44.722176+06:00",
+  "ended_at": null,
+  "message_count": 5,
+  "messages": [
+    {
+      "role": "user",
+      "content": "ok zoe goodnight",
+      "timestamp": "2026-09-25T03:11:44.722751+06:00"
+    },
+    {
+      "role": "user",
+      "content": "goodnight zoe",
+      "timestamp": "2026-09-25T03:12:07.956160+06:00"
+    },
+    {
+      "role": "user",
+      "content": "hi",
+      "timestamp": "2026-09-25T03:12:12.563110+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Hello Boss. What can I do for you tonight?",
+      "timestamp": "2026-09-25T03:12:13.823116+06:00"
+    },
+    {
+      "role": "user",
+      "content": "goodnight",
+      "timestamp": "2026-09-25T03:12:20.297181+06:00"
+    }
+  ]
+}

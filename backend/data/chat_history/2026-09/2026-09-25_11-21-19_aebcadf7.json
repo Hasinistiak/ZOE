@@ -1,0 +1,53 @@
+{
+  "session_id": "aebcadf7-117b-4f0f-a401-b650fadc2a22",
+  "started_at": "2026-09-25T11:21:19.305542+06:00",
+  "ended_at": null,
+  "message_count": 9,
+  "messages": [
+    {
+      "role": "user",
+      "content": "hey z wassup",
+      "timestamp": "2026-09-25T11:21:19.305930+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Not much, Boss. What's on your mind?",
+      "timestamp": "2026-09-25T11:21:20.840714+06:00"
+    },
+    {
+      "role": "user",
+      "content": "mute",
+      "timestamp": "2026-09-25T11:21:34.204615+06:00"
+    },
+    {
+      "role": "user",
+      "content": "unmute",
+      "timestamp": "2026-09-25T11:21:40.925408+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I'm having trouble thinking that through right now — give me a moment and try again.",
+      "timestamp": "2026-09-25T11:21:42.330343+06:00"
+    },
+    {
+      "role": "user",
+      "content": "how's the weather?",
+      "timestamp": "2026-09-25T11:21:54.246379+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "It's 28°C and feels like 32°C in Chittagong, Boss, with sunny skies and a light breeze from the SSE.",
+      "timestamp": "2026-09-25T11:22:11.666795+06:00"
+    },
+    {
+      "role": "user",
+      "content": "will there bee any rain when I'm out?",
+      "timestamp": "2026-09-25T11:22:36.771214+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Intermittent showers are expected later, Boss, especially from late afternoon through the night, with a peak chance around 66% this evening.",
+      "timestamp": "2026-09-25T11:22:41.901171+06:00"
+    }
+  ]
+}

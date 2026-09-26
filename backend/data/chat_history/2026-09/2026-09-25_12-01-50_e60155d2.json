@@ -1,0 +1,58 @@
+{
+  "session_id": "e60155d2-4ef9-4ff1-833a-2ac527f5bccd",
+  "started_at": "2026-09-25T12:01:50.147911+06:00",
+  "ended_at": null,
+  "message_count": 10,
+  "messages": [
+    {
+      "role": "user",
+      "content": "open youtube",
+      "timestamp": "2026-09-25T12:01:50.148871+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I'm having trouble thinking that through right now — give me a moment and try again.",
+      "timestamp": "2026-09-25T12:01:51.567590+06:00"
+    },
+    {
+      "role": "user",
+      "content": "open youtube.com",
+      "timestamp": "2026-09-25T12:01:55.728354+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Opening YouTube for you, Sir.",
+      "timestamp": "2026-09-25T12:01:56.966736+06:00"
+    },
+    {
+      "role": "user",
+      "content": "sup",
+      "timestamp": "2026-09-25T12:02:05.802067+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Not much, Boss. What's on your mind?",
+      "timestamp": "2026-09-25T12:02:07.151585+06:00"
+    },
+    {
+      "role": "user",
+      "content": "open youtube.com",
+      "timestamp": "2026-09-25T12:02:12.640380+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I'm having trouble thinking that through right now — give me a moment and try again.",
+      "timestamp": "2026-09-25T12:02:13.951460+06:00"
+    },
+    {
+      "role": "user",
+      "content": "open youtube",
+      "timestamp": "2026-09-25T12:04:53.181411+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I'm having trouble thinking that through right now — give me a moment and try again.",
+      "timestamp": "2026-09-25T12:04:54.742853+06:00"
+    }
+  ]
+}

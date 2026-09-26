@@ -1,0 +1,58 @@
+{
+  "session_id": "db85db06-bf12-4430-a327-bd7310531ee1",
+  "started_at": "2026-09-25T12:18:55.892404+06:00",
+  "ended_at": null,
+  "message_count": 10,
+  "messages": [
+    {
+      "role": "user",
+      "content": "add a tesst event to calendar  at 33pm",
+      "timestamp": "2026-09-25T12:18:55.894301+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Check the time, Sir.",
+      "timestamp": "2026-09-25T12:18:57.129494+06:00"
+    },
+    {
+      "role": "user",
+      "content": "add a tesst event to calendar at 33pm",
+      "timestamp": "2026-09-25T12:19:05.113378+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Invalid time format, Sir.",
+      "timestamp": "2026-09-25T12:19:06.490565+06:00"
+    },
+    {
+      "role": "user",
+      "content": "add a tesst event to calendar at 3pm",
+      "timestamp": "2026-09-25T12:19:11.958188+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Done, Sir.",
+      "timestamp": "2026-09-25T12:19:16.975533+06:00"
+    },
+    {
+      "role": "user",
+      "content": "go ahead nd remove it now",
+      "timestamp": "2026-09-25T12:19:40.583851+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Removed, Sir.",
+      "timestamp": "2026-09-25T12:19:45.936427+06:00"
+    },
+    {
+      "role": "user",
+      "content": "open youtube",
+      "timestamp": "2026-09-25T12:19:56.842757+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Opening YouTube, Sir.",
+      "timestamp": "2026-09-25T12:19:58.171195+06:00"
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "session_id": "217577c4-b6f7-4ded-bc9d-b55808c57682",
+  "started_at": "2026-09-25T23:59:06.941025+06:00",
+  "ended_at": null,
+  "message_count": 6,
+  "messages": [
+    {
+      "role": "user",
+      "content": "The full form of Zoe is a bit boring and uncool",
+      "timestamp": "2026-09-26T00:08:32.286116+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I'm having trouble thinking that through right now — give me a moment and try again.",
+      "timestamp": "2026-09-26T00:09:25.143322+06:00"
+    },
+    {
+      "role": "user",
+      "content": "sup",
+      "timestamp": "2026-09-26T00:22:46.211663+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Sup, Boss.",
+      "timestamp": "2026-09-26T00:23:30.694879+06:00"
+    },
+    {
+      "role": "user",
+      "content": "the zoe fullname is not cool or yk doesn't feel as good as jarvis or friday or edith's full form",
+      "timestamp": "2026-09-26T00:24:13.527951+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I'm having trouble thinking that through right now — give me a moment and try again.",
+      "timestamp": "2026-09-26T00:25:24.411817+06:00"
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "session_id": "f685a378-8455-48c7-adba-bb007c3ea657",
+  "started_at": "2026-09-25T03:21:19.756965+06:00",
+  "ended_at": null,
+  "message_count": 1,
+  "messages": [
+    {
+      "role": "user",
+      "content": "goodnight zoe",
+      "timestamp": "2026-09-25T03:21:19.758020+06:00"
+    }
+  ]
+}

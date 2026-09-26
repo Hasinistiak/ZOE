@@ -1,0 +1,108 @@
+{
+  "session_id": "f42bb54a-ecb1-4a19-8e4e-df06828905ac",
+  "started_at": "2026-09-25T12:25:22.138123+06:00",
+  "ended_at": null,
+  "message_count": 20,
+  "messages": [
+    {
+      "role": "user",
+      "content": "open youtube",
+      "timestamp": "2026-09-25T12:25:22.138849+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Opening YouTube.",
+      "timestamp": "2026-09-25T12:25:23.679225+06:00"
+    },
+    {
+      "role": "user",
+      "content": "add a test event at 2pm",
+      "timestamp": "2026-09-25T12:25:38.919743+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Done, Sir.",
+      "timestamp": "2026-09-25T12:25:44.008279+06:00"
+    },
+    {
+      "role": "user",
+      "content": "now remove it",
+      "timestamp": "2026-09-25T12:26:01.085769+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Removed, Sir.",
+      "timestamp": "2026-09-25T12:26:06.087184+06:00"
+    },
+    {
+      "role": "user",
+      "content": "wakeuup",
+      "timestamp": "2026-09-25T12:27:03.222495+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I'm awake, Boss.",
+      "timestamp": "2026-09-25T12:27:04.812437+06:00"
+    },
+    {
+      "role": "user",
+      "content": "zoe how's my day looking",
+      "timestamp": "2026-09-25T12:27:13.492295+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "You have 'Avengers Endgame: Encore 2D' at 3:20 PM today, Boss.",
+      "timestamp": "2026-09-25T12:27:17.977329+06:00"
+    },
+    {
+      "role": "user",
+      "content": "and tomorrow?",
+      "timestamp": "2026-09-25T12:27:27.882144+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Tomorrow you have Nayeem Sir at 9:00 AM, Monoj Sir at 10:00 AM, ICT Class at 11:00 AM, and your Home Tutor at 8:00 PM, Boss.",
+      "timestamp": "2026-09-25T12:27:32.938498+06:00"
+    },
+    {
+      "role": "user",
+      "content": "remind me to call my home tutor to reschedule the class for the eye doctor's appointment",
+      "timestamp": "2026-09-25T12:28:14.635928+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Done, Boss.",
+      "timestamp": "2026-09-25T12:28:21.291931+06:00"
+    },
+    {
+      "role": "user",
+      "content": "you should remind me about it at night maybe 8ish",
+      "timestamp": "2026-09-25T12:28:55.569861+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Done, Sir.",
+      "timestamp": "2026-09-25T12:29:05.606568+06:00"
+    },
+    {
+      "role": "user",
+      "content": "also the goals feature implementation that's overdue lets do it tomorrow  midnight?",
+      "timestamp": "2026-09-25T12:33:11.073821+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I'm having trouble thinking that through right now — give me a moment and try again.",
+      "timestamp": "2026-09-25T12:33:21.660145+06:00"
+    },
+    {
+      "role": "user",
+      "content": "also the goals feature implementation that's overdue lets do it tomorrow midnight?",
+      "timestamp": "2026-09-25T12:36:42.895744+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I'm having trouble thinking that through right now — give me a moment and try again.",
+      "timestamp": "2026-09-25T12:36:45.949511+06:00"
+    }
+  ]
+}

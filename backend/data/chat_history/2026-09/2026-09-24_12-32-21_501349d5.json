@@ -1,0 +1,38 @@
+{
+  "session_id": "501349d5-a109-4f47-88df-17c3996fcd0d",
+  "started_at": "2026-09-24T12:32:21.153344+06:00",
+  "ended_at": null,
+  "message_count": 6,
+  "messages": [
+    {
+      "role": "user",
+      "content": "good morning zoe",
+      "timestamp": "2026-09-24T12:32:21.155081+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Good afternoon, Sir. It is past midday, but I appreciate the sentiment nonetheless. How may I assist you today?",
+      "timestamp": "2026-09-24T12:32:23.815700+06:00"
+    },
+    {
+      "role": "user",
+      "content": "give me an update on the day ahead",
+      "timestamp": "2026-09-24T12:32:54.079168+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "You have one event on your calendar today: Parvez Sir Biology at 4:00 PM. Additionally, your reminder to implement the goals feature was due yesterday, Sir.",
+      "timestamp": "2026-09-24T12:33:08.976575+06:00"
+    },
+    {
+      "role": "user",
+      "content": "I have an eye doctor appointment at 7pm today and I gotta finish math homework tonight",
+      "timestamp": "2026-09-24T12:34:17.065382+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "I've added your eye doctor appointment at 7:00 PM today and set a reminder to finish your math homework tonight, Sir.",
+      "timestamp": "2026-09-24T12:34:33.475598+06:00"
+    }
+  ]
+}

@@ -1,0 +1,38 @@
+{
+  "session_id": "35cae1bd-11e2-40f7-a9e6-a9d2659050e3",
+  "started_at": "2026-09-24T13:09:57.046230+06:00",
+  "ended_at": null,
+  "message_count": 6,
+  "messages": [
+    {
+      "role": "user",
+      "content": "wake up daddy's home",
+      "timestamp": "2026-09-24T13:09:57.060973+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "Welcome home, Boss. Glad to have you back. What's on your mind?",
+      "timestamp": "2026-09-24T13:09:59.192388+06:00"
+    },
+    {
+      "role": "user",
+      "content": "what phone was I planning to upgrade to?",
+      "timestamp": "2026-09-24T13:10:21.188963+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "You were looking at the iPhone 15, Boss.",
+      "timestamp": "2026-09-24T13:10:28.047782+06:00"
+    },
+    {
+      "role": "user",
+      "content": "yeah good phone ngl",
+      "timestamp": "2026-09-24T13:10:36.980022+06:00"
+    },
+    {
+      "role": "assistant",
+      "content": "It really is, Boss. Solid performance and great build. Are you thinking about pulling the trigger on it soon?",
+      "timestamp": "2026-09-24T13:10:39.074566+06:00"
+    }
+  ]
+}

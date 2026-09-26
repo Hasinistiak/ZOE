@@ -1,0 +1,13 @@
+{
+  "session_id": "338b9613-c699-407a-9437-218b54bc29e9",
+  "started_at": "2026-09-24T03:33:14.667986+06:00",
+  "ended_at": null,
+  "message_count": 1,
+  "messages": [
+    {
+      "role": "user",
+      "content": "Explain how an operating system manages memory, including virtual memory, paging, caching, swap, and what happens when RAM gets full. Compare Windows, Linux, and macOS. Make it detailed enough to be useful as a reference",
+      "timestamp": "2026-09-24T03:33:14.670146+06:00"
+    }
+  ]
+}
