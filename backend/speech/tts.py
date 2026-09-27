@@ -495,7 +495,7 @@ _TEMPERATURE_PATTERN = re.compile(
 )
 
 _TIME_12_PATTERN = re.compile(
-    r"\b(0?\d|1[0-2]):([0-5]\d)\s*(AM|PM)\b",
+    r"\b(0?\d|1[0-2]):([0-5]\d)\s*(A M|P M)\b",
     re.IGNORECASE,
 )
 
