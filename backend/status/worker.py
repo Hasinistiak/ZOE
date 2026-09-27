@@ -161,7 +161,8 @@ def _default_sources() -> dict[
 
         return check_emails(
             max_results=25,
-            unread_only=False,
+            unread_only=True,
+            since_seconds=60,
         )
 
     def weather() -> Any:

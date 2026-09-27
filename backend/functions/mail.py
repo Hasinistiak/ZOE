@@ -1,8 +1,9 @@
+
 from __future__ import annotations
 
-import os
 from pathlib import Path
 from typing import Any
+import time
 
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -39,7 +40,10 @@ def _get_gmail_service():
         Reuses the saved refresh token.
     """
 
-    TOKEN_FILE.parent.mkdir(parents=True, exist_ok=True)
+    TOKEN_FILE.parent.mkdir(
+        parents=True,
+        exist_ok=True,
+    )
 
     creds: Credentials | None = None
 
@@ -57,7 +61,11 @@ def _get_gmail_service():
     # Refresh expired credentials
     # --------------------------------------------------------
 
-    if creds and creds.expired and creds.refresh_token:
+    if (
+        creds
+        and creds.expired
+        and creds.refresh_token
+    ):
         creds.refresh(Request())
 
     # --------------------------------------------------------
@@ -65,9 +73,11 @@ def _get_gmail_service():
     # --------------------------------------------------------
 
     if not creds or not creds.valid:
+
         if not CREDENTIALS_FILE.exists():
             raise FileNotFoundError(
-                f"Gmail credentials file not found: {CREDENTIALS_FILE}"
+                f"Gmail credentials file not found: "
+                f"{CREDENTIALS_FILE}"
             )
 
         flow = InstalledAppFlow.from_client_secrets_file(
@@ -120,22 +130,58 @@ def _get_header(
 
 
 # ============================================================
-# CHECK EMAILS
+# CHECK PRIMARY EMAILS
 # ============================================================
 
 def check_emails(
-    max_results: int = 10,
-    unread_only: bool = False,
+    max_results: int = 25,
+    unread_only: bool = True,
+    since_seconds: int | None = None,
 ) -> dict[str, Any]:
     """
-    Check recent Gmail messages.
+    Fetch emails from Gmail's Primary category.
+
+    Defaults:
+        - No time limit
+        - Unread only
+
+    Examples:
+
+        check_emails()
+
+            -> All unread Primary emails.
+
+        check_emails(unread_only=False)
+
+            -> All Primary emails.
+
+        check_emails(since_seconds=60)
+
+            -> Unread Primary emails from the last 60 seconds.
+
+        check_emails(
+            unread_only=False,
+            since_seconds=60,
+        )
+
+            -> All Primary emails from the last 60 seconds.
 
     Args:
         max_results:
-            Maximum number of emails to return.
+            Maximum number of Gmail messages to inspect.
 
         unread_only:
-            If True, only return unread emails.
+            If True, only return unread messages.
+
+        since_seconds:
+            Optional sliding time window.
+
+            None:
+                No time restriction.
+
+            60:
+                Only messages received during the last
+                60 seconds.
 
     Returns:
         Structured dictionary containing email information.
@@ -145,10 +191,35 @@ def check_emails(
         service = _get_gmail_service()
 
         # ----------------------------------------------------
-        # Build Gmail query
+        # Build Gmail search query
         # ----------------------------------------------------
 
-        query = "is:unread" if unread_only else ""
+        query_parts = [
+            "category:primary",
+        ]
+
+        if unread_only:
+            query_parts.append(
+                "is:unread"
+            )
+
+        if since_seconds is not None:
+            since_seconds = max(
+                1,
+                int(since_seconds),
+            )
+
+            cutoff = int(time.time()) - since_seconds
+
+            query_parts.append(
+                f"after:{cutoff}"
+            )
+
+        query = " ".join(query_parts)
+
+        # ----------------------------------------------------
+        # Search Gmail
+        # ----------------------------------------------------
 
         response = (
             service.users()
@@ -161,7 +232,10 @@ def check_emails(
             .execute()
         )
 
-        messages = response.get("messages", [])
+        messages = response.get(
+            "messages",
+            [],
+        )
 
         emails: list[dict[str, Any]] = []
 
@@ -193,23 +267,92 @@ def check_emails(
                 .execute()
             )
 
-            payload = email.get("payload", {})
+            payload = email.get(
+                "payload",
+                {},
+            )
 
-            headers = payload.get("headers", [])
+            headers = payload.get(
+                "headers",
+                [],
+            )
 
-            label_ids = email.get("labelIds", [])
+            label_ids = email.get(
+                "labelIds",
+                [],
+            )
+
+            # ------------------------------------------------
+            # Extra protection for exact time filtering
+            # ------------------------------------------------
+
+            if since_seconds is not None:
+
+                internal_date = email.get(
+                    "internalDate"
+                )
+
+                if internal_date:
+
+                    message_time = int(
+                        internal_date
+                    ) / 1000
+
+                    cutoff_time = (
+                        time.time()
+                        - since_seconds
+                    )
+
+                    if message_time < cutoff_time:
+                        continue
+
+            # ------------------------------------------------
+            # Build normalized email object
+            # ------------------------------------------------
 
             emails.append(
                 {
                     "id": message_id,
-                    "thread_id": email.get("threadId"),
-                    "from": _get_header(headers, "From"),
-                    "to": _get_header(headers, "To"),
-                    "subject": _get_header(headers, "Subject"),
-                    "date": _get_header(headers, "Date"),
-                    "snippet": email.get("snippet", ""),
-                    "unread": "UNREAD" in label_ids,
+
+                    "thread_id": email.get(
+                        "threadId"
+                    ),
+
+                    "from": _get_header(
+                        headers,
+                        "From",
+                    ),
+
+                    "to": _get_header(
+                        headers,
+                        "To",
+                    ),
+
+                    "subject": _get_header(
+                        headers,
+                        "Subject",
+                    ),
+
+                    "date": _get_header(
+                        headers,
+                        "Date",
+                    ),
+
+                    "snippet": email.get(
+                        "snippet",
+                        "",
+                    ),
+
+                    "unread": (
+                        "UNREAD"
+                        in label_ids
+                    ),
+
                     "labels": label_ids,
+
+                    "internal_date": email.get(
+                        "internalDate"
+                    ),
                 }
             )
 
@@ -224,6 +367,7 @@ def check_emails(
         }
 
     except Exception as exc:
+
         return {
             "success": False,
             "count": 0,
@@ -238,29 +382,47 @@ def check_emails(
 
 if __name__ == "__main__":
 
+    # Default behavior:
+    # No time limit + unread only.
     result = check_emails(
-        max_results=10,
-        unread_only=False,
+        max_results=25,
     )
 
     print("\n" + "=" * 70)
-    print("ZOE EMAIL CHECK")
+    print("ZOE PRIMARY EMAIL CHECK")
     print("=" * 70)
 
+    print("\nMode: UNREAD ONLY")
+    print("Time limit: NONE")
+
     if not result["success"]:
-        print(f"\nERROR: {result['error']}")
+
+        print(
+            f"\nERROR: {result['error']}"
+        )
+
         raise SystemExit(1)
 
-    print(f"\nEmails found: {result['count']}\n")
+    print(
+        f"\nUnread emails found: "
+        f"{result['count']}\n"
+    )
 
     for email in result["emails"]:
 
-        status = "UNREAD" if email["unread"] else "READ"
+        status = (
+            "UNREAD"
+            if email["unread"]
+            else "READ"
+        )
 
         print("-" * 70)
+
         print(f"Status : {status}")
         print(f"From   : {email['from']}")
+        print(f"To     : {email['to']}")
         print(f"Subject: {email['subject']}")
         print(f"Date   : {email['date']}")
         print(f"Snippet: {email['snippet']}")
         print(f"ID     : {email['id']}")
+        print(f"Thread : {email['thread_id']}")
