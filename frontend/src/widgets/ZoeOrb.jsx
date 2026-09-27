@@ -1,24 +1,6 @@
 import React from "react";
 
-/*
-============================================================
-ZOE ORB
-Electric Blue / Silver / Obsidian
-============================================================
 
-Visual identity:
-  - Electric Blue = ZOE signature
-  - Light Blue = listening
-  - Bright Blue = speaking
-  - Silver = system structure
-  - Red = fault
-  - Obsidian = environment
-
-IMPORTANT:
-  Geometry and composition intentionally remain unchanged.
-  State changes only affect visual behavior.
-============================================================
-*/
 
 const STATE_CONFIG = {
   idle: {

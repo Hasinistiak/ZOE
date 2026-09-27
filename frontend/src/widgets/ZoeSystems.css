@@ -1203,65 +1203,7 @@
 @media (max-width: 600px) {
 
     .zoe-activity-widget {
-
-        left: 16px;
-        right: 16px;
-        bottom: 16px;
-
-        width: auto;
-
-    }
-
-
-    .zoe-surface {
-
-        left: 16px;
-        right: 16px;
-
-        top: 16px;
-
-        width: auto;
-
-    }
-
-
-    .zoe-notify-stack {
-
-        left: 16px;
-        right: 16px;
-
-        bottom: 16px;
-
-        width: auto;
-
-    }
-
-}
-
-
-/* ============================================================
-   REDUCED MOTION
-   ============================================================ */
-
-@media (prefers-reduced-motion: reduce) {
-
-    .zoe-activity-widget-entry,
-    .zoe-activity-widget-scroll,
-    .zoe-surface,
-    .zoe-notify {
-
-        transition: none;
-
-        scroll-behavior: auto;
-
-    }
-
-
-    .zoe-activity-live-dot,
-    .zoe-activity-footer-pulse {
-
-        animation: none;
-
+        display: none;
     }
 
 }

@@ -165,11 +165,45 @@ def is_spotify_open() -> bool:
     Check whether the Spotify desktop application appears
     to be running.
 
-    Works with normal Linux Spotify installations and also
-    catches Flatpak-style Spotify processes.
+    Supported:
+        - Windows
+        - Linux
+        - Flatpak Linux
+
+    Returns False rather than raising if process detection
+    is unavailable.
     """
 
     try:
+
+        # ====================================================
+        # WINDOWS
+        # ====================================================
+
+        if os.name == "nt":
+
+            result = subprocess.run(
+                [
+                    "tasklist",
+                    "/FI",
+                    "IMAGENAME eq Spotify.exe",
+                ],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.DEVNULL,
+                text=True,
+                check=False,
+            )
+
+            output = (
+                result.stdout or ""
+            ).lower()
+
+            return "spotify.exe" in output
+
+        # ====================================================
+        # LINUX / UNIX
+        # ====================================================
+
         result = subprocess.run(
             [
                 "pgrep",
@@ -184,83 +218,248 @@ def is_spotify_open() -> bool:
         return result.returncode == 0
 
     except FileNotFoundError:
-        # pgrep should exist on normal Linux systems.
-        # Fall back to checking process information.
-        try:
-            result = subprocess.run(
-                ["ps", "-A", "-o", "comm="],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.DEVNULL,
-                text=True,
-                check=False,
-            )
 
-            processes = [
-                line.strip().lower()
-                for line in result.stdout.splitlines()
-            ]
+        # ----------------------------------------------------
+        # Linux fallback when pgrep is unavailable.
+        # ----------------------------------------------------
 
-            return any(
-                process == "spotify"
-                or "spotify" in process
-                for process in processes
-            )
+        if os.name != "nt":
 
-        except Exception:
-            return False
+            try:
+
+                result = subprocess.run(
+                    [
+                        "ps",
+                        "-A",
+                        "-o",
+                        "comm=",
+                    ],
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.DEVNULL,
+                    text=True,
+                    check=False,
+                )
+
+                processes = [
+                    line.strip().lower()
+                    for line in result.stdout.splitlines()
+                ]
+
+                return any(
+                    process == "spotify"
+                    or "spotify" in process
+                    for process in processes
+                )
+
+            except Exception:
+                return False
+
+        return False
 
     except Exception:
         return False
 
 
-def _launch_spotify_process() -> bool:
+def _windows_spotify_candidates() -> list[str]:
     """
-    Launch the Spotify desktop application.
+    Return possible Windows Spotify executable locations.
 
-    Tries the native Spotify command first and then Flatpak.
+    Covers:
+        - Standard Spotify installation
+        - Per-user Spotify installation
+        - LOCALAPPDATA installation
+        - Program Files installation
+    """
+
+    candidates: list[str] = []
+
+    local_app_data = os.getenv(
+        "LOCALAPPDATA"
+    )
+
+    app_data = os.getenv(
+        "APPDATA"
+    )
+
+    program_files = os.getenv(
+        "PROGRAMFILES"
+    )
+
+    program_files_x86 = os.getenv(
+        "PROGRAMFILES(X86)"
+    )
+
+    if local_app_data:
+
+        candidates.extend([
+            os.path.join(
+                local_app_data,
+                "Spotify",
+                "Spotify.exe",
+            ),
+            os.path.join(
+                local_app_data,
+                "Microsoft",
+                "WindowsApps",
+                "Spotify.exe",
+            ),
+        ])
+
+    if app_data:
+
+        candidates.append(
+            os.path.join(
+                app_data,
+                "Spotify",
+                "Spotify.exe",
+            )
+        )
+
+    if program_files:
+
+        candidates.append(
+            os.path.join(
+                program_files,
+                "Spotify",
+                "Spotify.exe",
+            )
+        )
+
+    if program_files_x86:
+
+        candidates.append(
+            os.path.join(
+                program_files_x86,
+                "Spotify",
+                "Spotify.exe",
+            )
+        )
+
+    # --------------------------------------------------------
+    # Remove duplicates while preserving order.
+    # --------------------------------------------------------
+
+    unique: list[str] = []
+
+    for path in candidates:
+
+        normalized = os.path.normcase(
+            os.path.normpath(path)
+        )
+
+        if normalized not in {
+            os.path.normcase(
+                os.path.normpath(existing)
+            )
+            for existing in unique
+        }:
+
+            unique.append(path)
+
+    return unique
+
+
+def _launch_spotify_windows() -> bool:
+    """
+    Launch Spotify on Windows.
+
+    First tries known executable locations.
+    Then falls back to the Spotify URI protocol.
+    """
+
+    global _spotify_process
+
+    # ========================================================
+    # Try known Spotify.exe locations.
+    # ========================================================
+
+    for executable in _windows_spotify_candidates():
+
+        if not os.path.isfile(executable):
+            continue
+
+        try:
+
+            _spotify_process = subprocess.Popen(
+                [executable],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+                creationflags=(
+                    subprocess.CREATE_NEW_PROCESS_GROUP
+                    if hasattr(
+                        subprocess,
+                        "CREATE_NEW_PROCESS_GROUP",
+                    )
+                    else 0
+                ),
+            )
+
+            return True
+
+        except Exception:
+            continue
+
+    # ========================================================
+    # Fallback: Windows Spotify URI protocol.
+    # ========================================================
+
+    try:
+
+        os.startfile(
+            "spotify:"
+        )
+
+        return True
+
+    except Exception:
+        return False
+
+
+def _launch_spotify_linux() -> bool:
+    """
+    Launch Spotify on Linux.
+
+    Tries:
+        1. Native Spotify
+        2. Flatpak Spotify
     """
 
     global _spotify_process
 
     commands = [
         ["spotify"],
-        ["flatpak", "run", "com.spotify.Client"],
+        [
+            "flatpak",
+            "run",
+            "com.spotify.Client",
+        ],
     ]
 
     for command in commands:
 
         executable = command[0]
 
-        # ----------------------------------------------------
-        # Check whether executable exists.
-        # ----------------------------------------------------
+        try:
 
-        if executable == "spotify":
-            executable_exists = (
+            if (
                 subprocess.run(
-                    ["which", "spotify"],
+                    [
+                        "which",
+                        executable,
+                    ],
                     stdout=subprocess.DEVNULL,
                     stderr=subprocess.DEVNULL,
                     check=False,
                 ).returncode
-                == 0
-            )
+                != 0
+            ):
+                continue
 
-        else:
-            executable_exists = (
-                subprocess.run(
-                    ["which", "flatpak"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                    check=False,
-                ).returncode
-                == 0
-            )
-
-        if not executable_exists:
+        except Exception:
             continue
 
         try:
+
             _spotify_process = subprocess.Popen(
                 command,
                 stdout=subprocess.DEVNULL,
@@ -276,6 +475,22 @@ def _launch_spotify_process() -> bool:
     return False
 
 
+def _launch_spotify_process() -> bool:
+    """
+    Platform-aware Spotify launcher.
+
+    Supported:
+        - Windows
+        - Linux
+    """
+
+    if os.name == "nt":
+
+        return _launch_spotify_windows()
+
+    return _launch_spotify_linux()
+
+
 def ensure_spotify_open(
     wait_for_device: bool = False,
 ) -> dict[str, Any]:
@@ -289,15 +504,20 @@ def ensure_spotify_open(
         -> launch it.
 
     If wait_for_device=True:
-        -> also wait until Spotify exposes a playback device
+        -> wait until Spotify exposes a playback device
            through the Spotify Web API.
     """
 
     with _SPOTIFY_APP_LOCK:
 
+        # ====================================================
+        # Already running
+        # ====================================================
+
         already_open = is_spotify_open()
 
         if already_open:
+
             result: dict[str, Any] = {
                 "success": True,
                 "opened": False,
@@ -306,32 +526,40 @@ def ensure_spotify_open(
 
         else:
 
+            # =================================================
+            # Launch
+            # =================================================
+
             launched = _launch_spotify_process()
 
             if not launched:
+
                 return {
                     "success": False,
                     "opened": False,
                     "already_open": False,
                     "message": (
                         "Spotify is not running and could "
-                        "not be launched. Make sure Spotify "
-                        "is installed."
+                        "not be launched automatically."
                     ),
                 }
 
-            # ------------------------------------------------
-            # Give the desktop application time to start.
-            # ------------------------------------------------
+            # =================================================
+            # Wait for process to appear
+            # =================================================
 
             deadline = (
                 time.monotonic()
                 + SPOTIFY_STARTUP_WAIT
             )
 
+            process_started = False
+
             while time.monotonic() < deadline:
 
                 if is_spotify_open():
+
+                    process_started = True
                     break
 
                 time.sleep(0.2)
@@ -340,10 +568,11 @@ def ensure_spotify_open(
                 "success": True,
                 "opened": True,
                 "already_open": False,
+                "process_started": process_started,
             }
 
     # ========================================================
-    # Wait for Spotify API device if requested.
+    # Wait for Spotify Web API device
     # ========================================================
 
     if wait_for_device:
@@ -356,6 +585,7 @@ def ensure_spotify_open(
         while time.monotonic() < deadline:
 
             try:
+
                 sp = get_spotify()
 
                 response = sp.devices()
@@ -366,7 +596,9 @@ def ensure_spotify_open(
                 )
 
                 if devices:
+
                     result["device_ready"] = True
+
                     return result
 
             except Exception:
@@ -389,27 +621,38 @@ def open_spotify() -> dict[str, Any]:
     """
 
     try:
+
         result = ensure_spotify_open(
             wait_for_device=False
         )
 
         if not result.get("success"):
+
             return result
 
         if result.get("already_open"):
+
             return {
                 "success": True,
-                "message": "Spotify is already open.",
+                "opened": False,
+                "message": (
+                    "Spotify is already open."
+                ),
             }
 
         return {
             "success": True,
-            "message": "Spotify opened.",
+            "opened": True,
+            "message": (
+                "Spotify opened."
+            ),
         }
 
     except Exception as exc:
+
         return {
             "success": False,
+            "opened": False,
             "message": (
                 f"Could not open Spotify: {exc}"
             ),

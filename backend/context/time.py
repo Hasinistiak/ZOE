@@ -21,7 +21,7 @@ def get_time_context() -> dict:
 
     return {
         "datetime": now.isoformat(),
-        "date": now.strftime("%B %-d, %Y"),
+        "date": f"{now.strftime('%B')} {now.day}, {now.year}",
         "day": now.strftime("%A"),
         "time": now.strftime("%I:%M %p"),
         "timezone": "Asia/Dhaka",

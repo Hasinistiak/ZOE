@@ -1998,84 +1998,27 @@ textarea {
 
 
 /* ============================================================
-   PAGE MODE — TABLET
-   ============================================================ */
-
-@media (max-width: 900px) {
-
-    .zoe-persistent-orb.page-mode {
-
-        right: 18px;
-
-        transform:
-            translateY(-50%)
-            scale(0.52);
-    }
-}
-
-
-/* ============================================================
    MOBILE
    ============================================================ */
 
 @media (max-width: 600px) {
 
+    /* --------------------------------------------------------
+       HIDE DESKTOP HEADER
+       -------------------------------------------------------- */
+
     .zoe-topbar {
-
-        padding:
-            12px 16px;
-    }
-
-    .zoe-brand-sub {
-
         display: none;
     }
 
-    .zoe-brand-name {
 
-        font-size: 13px;
+    /* --------------------------------------------------------
+       RESPONSE AREA
+       Keep responses in the upper half of the screen.
+       -------------------------------------------------------- */
 
-        letter-spacing: 4px;
-    }
-
-    .zoe-time {
-
-        font-size: 14px;
-    }
-
-    .zoe-date {
-
-        font-size: 8px;
-
-        letter-spacing: 1.5px;
-    }
-
-    .zoe-orb-stage {
-
-        top: 32%;
-    }
-
-    /* STT responsive behavior preserved */
-
-    .zoe-voice-window {
-
-        width:
-            calc(100vw - 30px);
-
-        right: 15px;
-
-        top: auto;
-
-        bottom: 120px;
-
-        transform:
-            translateX(16px);
-    }
-
-    .zoe-voice-window.open {
-
-        transform:
-            translateX(0);
+    .responsebox {
+        display: none;
     }
 
 
@@ -2084,21 +2027,7 @@ textarea {
        -------------------------------------------------------- */
 
     .zoe-mic {
-
-        right: 18px;
-
-        bottom: 18px;
-
-        width: 150px;
-
-        height: 54px;
-
-        min-width: 150px;
-
-        min-height: 54px;
-
-        padding:
-            9px 13px;
+        display: none;
     }
 
 
@@ -2107,63 +2036,6 @@ textarea {
        -------------------------------------------------------- */
 
     .zoe-comms-trigger {
-
-        right: 18px;
-
-        left: auto;
-
-        bottom: 82px;
-
-        width: 150px;
-
-        height: 54px;
-
-        min-width: 150px;
-
-        min-height: 54px;
-
-        padding:
-            0 13px;
-    }
-
-    .zoe-comms-symbol {
-
-        font-size: 21px;
-    }
-
-    .zoe-persistent-orb.page-mode {
-
-        right: 8px;
-
-        transform:
-            translateY(-50%)
-            scale(0.44);
-    }
-
-    .chat-back {
-
-        min-width: 82px;
-
-        padding:
-            0 9px;
-
-        font-size: 7px;
-    }
-}
-
-
-/* ============================================================
-   VERY SMALL MOBILE
-   ============================================================ */
-
-@media (max-width: 420px) {
-
-    .zoe-persistent-orb.page-mode {
-
-        right: -2px;
-
-        transform:
-            translateY(-50%)
-            scale(0.38);
+        display: none;
     }
 }
