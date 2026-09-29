@@ -60,9 +60,15 @@ app = Flask(__name__)
 CORS(
     app,
     origins=[
+        # Development
         "https://zoe.local:5173",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
+
+        # Tauri production
+        "tauri://localhost",
+        "https://tauri.localhost",
+        "http://tauri.localhost",
     ],
 )
 
@@ -73,7 +79,7 @@ CORS(
 
 SSE_HEARTBEAT_SECONDS = 15
 
-SERVICE_NAME = "ZOE MARK 31"
+SERVICE_NAME = "ZOE MARK 33"
 
 FRONTEND_URL = "https://zoe.local:5173"
 

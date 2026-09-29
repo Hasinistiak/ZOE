@@ -1,8 +1,10 @@
+
 import React, {
     useEffect,
     useRef,
     useState,
 } from "react";
+
 import "./ProcessingHUD.css";
 
 /* ============================================================
@@ -20,6 +22,7 @@ export default function ProcessingHUD({
 }) {
 
     const startedAt = useRef(null);
+    const processingAudio = useRef(null);
 
     const [elapsed, setElapsed] = useState(0);
 
@@ -56,11 +59,107 @@ export default function ProcessingHUD({
 
 
     /* ========================================================
+       PROCESSING SOUND
+    ======================================================== */
+
+    useEffect(() => {
+
+        /*
+         * Processing finished.
+         * Stop and completely reset the sound.
+         */
+        if (!active) {
+
+            if (processingAudio.current) {
+
+                processingAudio.current.pause();
+
+                processingAudio.current.currentTime = 0;
+
+                processingAudio.current = null;
+            }
+
+            return;
+        }
+
+
+        /*
+         * Prevent duplicate audio instances.
+         */
+        if (processingAudio.current) {
+            return;
+        }
+
+
+        /*
+         * Create processing audio.
+         *
+         * The file should be placed at:
+         *
+         * public/sounds/zoe-processing.mp3
+         */
+        const audio =
+            new Audio("/sounds/zoe-processing.mp3");
+
+
+        /*
+         * Continuously loop while ZOE is processing.
+         */
+        audio.loop = true;
+
+
+        /*
+         * Keep this subtle.
+         *
+         * ZOE's processing sound should sit underneath
+         * the interface rather than overpower it.
+         */
+        audio.volume = 0.18;
+
+
+        processingAudio.current = audio;
+
+
+        /*
+         * Start playback.
+         *
+         * Browsers can occasionally reject playback because
+         * of autoplay restrictions. We intentionally ignore
+         * that failure rather than generating a UI error.
+         */
+        audio.play().catch(() => {
+            // Browser autoplay policy blocked playback.
+        });
+
+
+        /*
+         * Cleanup when processing ends or the component
+         * unmounts.
+         */
+        return () => {
+
+            audio.pause();
+
+            audio.currentTime = 0;
+
+            if (processingAudio.current === audio) {
+                processingAudio.current = null;
+            }
+
+        };
+
+    }, [active]);
+
+
+    /* ========================================================
        ELAPSED TIMER
     ======================================================== */
 
     useEffect(() => {
 
+        /*
+         * Processing stopped.
+         */
         if (!active) {
 
             startedAt.current = null;
@@ -71,6 +170,10 @@ export default function ProcessingHUD({
         }
 
 
+        /*
+         * Start timing only once for the current
+         * processing session.
+         */
         if (!startedAt.current) {
 
             startedAt.current =
@@ -84,6 +187,7 @@ export default function ProcessingHUD({
                 if (!startedAt.current) {
                     return;
                 }
+
 
                 setElapsed(
                     (performance.now() - startedAt.current) /
@@ -164,8 +268,10 @@ export default function ProcessingHUD({
 
                 ? normalizedAgents.length > 0
                     ? normalizedAgents[0].name.toUpperCase()
+
                     : agentName
                         ? agentName.toUpperCase()
+
                         : "BACKGROUND WORK"
 
                 : "ANALYZING REQUEST";
@@ -290,9 +396,11 @@ export default function ProcessingHUD({
                             CURRENT OPERATION
                         </span>
 
+
                         <div className="processing-hud__operation-value">
                             {operationLabel}
                         </div>
+
 
                         <div className="processing-hud__detail">
                             {detailLabel}
@@ -311,9 +419,11 @@ export default function ProcessingHUD({
                             ACTIVE
                         </span>
 
+
                         <strong>
                             {elapsed.toFixed(1)}
                         </strong>
+
 
                         <small>
                             SEC
@@ -339,6 +449,7 @@ export default function ProcessingHUD({
                                 ACTIVE AGENTS
                             </span>
 
+
                             <strong>
                                 {String(agentCount).padStart(2, "0")}
                             </strong>
@@ -362,6 +473,7 @@ export default function ProcessingHUD({
                                             <div className="processing-hud__agent-name">
 
                                                 <span className="processing-hud__agent-dot" />
+
 
                                                 <span>
                                                     {String(
@@ -432,13 +544,17 @@ export default function ProcessingHUD({
                         INPUT
                     </span>
 
+
                     <i />
+
 
                     <span className="processing-hud__pipeline-item active">
                         ROUTE
                     </span>
 
+
                     <i />
+
 
                     <span className="processing-hud__pipeline-item active">
                         {background
@@ -446,13 +562,17 @@ export default function ProcessingHUD({
                             : "CORE"}
                     </span>
 
+
                     <i />
+
 
                     <span className="processing-hud__pipeline-item active">
                         EXECUTE
                     </span>
 
+
                     <i />
+
 
                     <span className="processing-hud__pipeline-item">
                         OUTPUT

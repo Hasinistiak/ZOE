@@ -1,134 +1,103 @@
-from ollama import chat
+
+from __future__ import annotations
+
+import os
 import time
-import re
 
-MODEL = "qwen3:0.6b"
+from google import genai
+from dotenv import load_dotenv
 
-TESTS = [
-    ("Hi", False),
-    ("Good morning", False),
-    ("What's the weather today?", False),
-    ("What time is it?", False),
-    ("What's on my calendar today?", False),
-    ("Set a reminder for 6 PM", False),
-    ("Play some music", False),
-    ("Who is Real Madrid playing next?", False),
-    ("Explain virtual memory", False),
-    ("What is Python?", False),
 
-    ("What was that programming language I told you I was learning?", True),
-    ("What GPU was I considering buying?", True),
-    ("What's my usual wake-up time?", True),
-    ("What did I call my AI assistant?", True),
-    ("What project was I working on yesterday?", True),
-    ("Do you remember what phone I have?", True),
-    ("What music do I usually listen to?", True),
-    ("What did I say about my PC?", True),
-    ("What name did I give the coding assistant project?", True),
-    ("What were the specs I told you about my computer?", True),
+load_dotenv()
 
-    ("Do you remember?", True),
-    ("Remember what we discussed earlier?", True),
-    ("Can you remind me what I said?", True),
-    ("What did I just tell you?", False),
-    ("What did I say about this?", True),
-    ("Tell me about my project", True),
-    ("Tell me about Python", False),
-    ("How did we configure this?", True),
-    ("Why did we choose this model?", True),
-    ("Which model are you using?", False),
+# ============================================================
+# CONFIG
+# ============================================================
+
+MODELS = [
+    "gemini-3.5-flash-lite",
+    "gemini-3.1-flash-lite",
+    "gemini-3.6-flash",
 ]
 
-SYSTEM = """You are ZOE's memory retrieval gate.
+PROMPT = """
+You are the reasoning core of a personal AI assistant.
+Analyze this request and respond with a concise answer:
 
-Determine whether the user's message requires persistent memory about the user.
-
-Return exactly one word:
-true
-or
-false
-
-true = the answer requires information from previous conversations, saved user
-facts, preferences, previous decisions, or previous project context.
-
-false = the answer does not require persistent memory.
-
-Current conversation context is NOT persistent memory.
-
-Do not explain.
-Do not answer the user.
-Do not use JSON.
-Return ONLY true or false.
-
- /no_think
+The user wants to create a Python desktop application that monitors
+system resources and alerts them when CPU temperature becomes too high.
+What are the main components the application needs?
 """
 
-
-def classify(message: str):
-    start = time.perf_counter()
-
-    response = chat(
-        model=MODEL,
-        messages=[
-            {"role": "system", "content": SYSTEM},
-            {"role": "user", "content": message},
-        ],
-        options={
-            "temperature": 0,
-            "num_predict": 1,
-        },
-    )
-
-    elapsed = (time.perf_counter() - start) * 1000
-
-    raw = response["message"]["content"].strip().lower()
-
-    # Remove Qwen thinking tags if they somehow appear.
-    raw = re.sub(r"<think>.*?</think>", "", raw, flags=re.DOTALL).strip()
-
-    # Extract the decision.
-    if re.search(r"\btrue\b", raw):
-        result = True
-    elif re.search(r"\bfalse\b", raw):
-        result = False
-    else:
-        result = None
-
-    return result, elapsed, raw
+ROUNDS = 3
 
 
-correct = 0
-total_time = 0
+# ============================================================
+# CLIENT
+# ============================================================
+
+api_key = os.getenv("GEMINI_API_KEY")
+
+if not api_key:
+    raise RuntimeError("GEMINI_API_KEY environment variable is not set.")
+
+client = genai.Client(api_key=api_key)
+
+
+# ============================================================
+# BENCHMARK
+# ============================================================
 
 print("=" * 70)
-print("ZOE MEMORY GATE — QWEN3 0.6B")
+print("              GEMINI SPEED BENCHMARK")
 print("=" * 70)
 
-for question, expected in TESTS:
-    result, ms, raw = classify(question)
+print(f"\nRounds per model: {ROUNDS}")
 
-    ok = result == expected
+for model in MODELS:
+    print("\n" + "-" * 70)
+    print(f"MODEL: {model}")
+    print("-" * 70)
 
-    if ok:
-        correct += 1
+    times: list[float] = []
 
-    total_time += ms
+    for round_number in range(1, ROUNDS + 1):
+        print(f"[{round_number}/{ROUNDS}] Testing...", end=" ", flush=True)
 
-    print(
-        f"{'✓' if ok else '✗'} "
-        f"{ms:7.0f} ms | "
-        f"expected={str(expected):5} | "
-        f"got={str(result):5} | "
-        f"{question}"
-    )
+        start = time.perf_counter()
 
-    if result is None:
-        print(f"         RAW: {raw!r}")
+        try:
+            response = client.models.generate_content(
+                model=model,
+                contents=PROMPT,
+            )
 
-accuracy = correct / len(TESTS) * 100
-avg_ms = total_time / len(TESTS)
+            elapsed = time.perf_counter() - start
+            times.append(elapsed)
 
-print("=" * 70)
-print(f"Accuracy : {accuracy:.1f}% ({correct}/{len(TESTS)})")
-print(f"Avg time : {avg_ms:.0f} ms")
+            text = response.text or ""
+
+            print(f"{elapsed:.2f}s")
+
+            if round_number == 1:
+                print(f"Response: {text[:250].replace(chr(10), ' ')}")
+
+        except Exception as exc:
+            elapsed = time.perf_counter() - start
+            print(f"FAILED after {elapsed:.2f}s")
+            print(f"Error: {exc}")
+
+    if times:
+        average = sum(times) / len(times)
+        fastest = min(times)
+        slowest = max(times)
+
+        print("\nResults:")
+        print(f"  Average : {average:.2f}s")
+        print(f"  Fastest : {fastest:.2f}s")
+        print(f"  Slowest : {slowest:.2f}s")
+
+
+print("\n" + "=" * 70)
+print("Benchmark complete.")
 print("=" * 70)

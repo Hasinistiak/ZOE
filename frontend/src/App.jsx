@@ -21,7 +21,12 @@ import {
     NotificationStack,
     ActivityStream,
 } from "./widgets/ZoeSystems";
+import GlobalClickSound from "./widgets/GlobalClickSound";
 
+
+const API_BASE = import.meta.env.DEV
+    ? ""
+    : "http://127.0.0.1:8000";
 
 // ============================================================
 // STATE METADATA
@@ -871,7 +876,7 @@ export default function ZoeDashboard() {
 
                 const res =
                     await fetch(
-                        "/api/state",
+                        `${API_BASE}/api/state`,
                         {
                             method: "GET",
                             cache: "no-store",
@@ -1402,8 +1407,8 @@ export default function ZoeDashboard() {
 
             const endpoint =
                 muted
-                    ? "/api/microphone/unmute"
-                    : "/api/microphone/mute";
+                    ? `${API_BASE}/api/microphone/unmute`
+                    : `${API_BASE}/api/microphone/mute`;
 
 
             const res =
@@ -1792,7 +1797,8 @@ export default function ZoeDashboard() {
     // ============================================================
 
     return (
-
+        <>
+ <GlobalClickSound />
         <div
             className={
                 `zoe-dashboard ${activePage
@@ -2254,6 +2260,7 @@ export default function ZoeDashboard() {
             </div>
 
         </div>
+        </>
 
     );
 

@@ -15,6 +15,11 @@ export default function ChatPage({
     onClose,
 }) {
 
+    
+    const API_BASE = import.meta.env.DEV
+    ? ""
+    : "http://127.0.0.1:8000";
+    
     // ========================================================
     // LOCAL CHAT STATE
     // ========================================================
@@ -448,7 +453,7 @@ export default function ChatPage({
 
             const res =
                 await fetch(
-                    "/api/chat",
+                    `${API_BASE}/api/chat`,
                     {
                         method: "POST",
 
@@ -890,7 +895,7 @@ export default function ChatPage({
 
                     <span>•</span>
 
-                    MARK 31
+                    MARK 33
 
                 </div>
 

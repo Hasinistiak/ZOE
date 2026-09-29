@@ -1,10 +1,10 @@
-
 from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Callable
 
 import atexit
+import argparse
 import logging
 import os
 import queue
@@ -22,6 +22,7 @@ from pocket_tts import TTSModel
 # ============================================================================
 
 VOICE = os.getenv("ZOE_TTS_VOICE", "eve").strip() or "eve"
+
 LANGUAGE = os.getenv("ZOE_TTS_LANG", "english").strip() or "english"
 
 SAMPLER_DECODE_STEPS = max(
@@ -49,20 +50,27 @@ MAX_GENERATION_QUEUE = max(
     MAX_AUDIO_QUEUE * 2,
 )
 
-# Optional output device.
-#
-# Empty = Windows default output device.
+# Optional Windows output device.
 #
 # Examples:
 #   ZOE_TTS_DEVICE=Speakers
 #   ZOE_TTS_DEVICE=3
 #
-# Leave unset unless you specifically need another device.
-TTS_DEVICE = os.getenv("ZOE_TTS_DEVICE", "").strip() or None
+# Leave unset to use the Windows default output device.
 
-# Small latency-friendly block size.
-# 0 lets PortAudio choose an appropriate block size.
-AUDIO_BLOCKSIZE = int(os.getenv("ZOE_TTS_BLOCKSIZE", "0"))
+TTS_DEVICE = os.getenv(
+    "ZOE_TTS_DEVICE",
+    "",
+).strip() or None
+
+# 0 lets PortAudio choose.
+AUDIO_BLOCKSIZE = int(
+    os.getenv(
+        "ZOE_TTS_BLOCKSIZE",
+        "0",
+    )
+)
+
 
 # ============================================================================
 # LOGGING
@@ -72,7 +80,10 @@ LOGGER = logging.getLogger("zoe.tts")
 
 if not LOGGER.handlers:
     logging.basicConfig(
-        level=os.getenv("ZOE_TTS_LOG_LEVEL", "INFO").upper(),
+        level=os.getenv(
+            "ZOE_TTS_LOG_LEVEL",
+            "INFO",
+        ).upper(),
         format="[ZOE TTS] %(levelname)s: %(message)s",
     )
 
@@ -92,14 +103,20 @@ class SpeechRequest:
 class GenerationState:
     generation_id: int
     total_chunks: int
+
     generated_chunks: int = 0
     audio_chunks_enqueued: int = 0
+
     generation_finished: bool = False
     generation_failed: bool = False
+
     playback_started: bool = False
     playback_finished: bool = False
+
     cancelled: bool = False
+
     error: str = ""
+
     speech_complete_event: threading.Event = field(
         default_factory=threading.Event,
     )
@@ -111,6 +128,7 @@ class GenerationState:
 
 _tts: TTSModel | None = None
 _voice_state = None
+
 _tts_init_lock = threading.RLock()
 
 
@@ -118,25 +136,38 @@ def preload() -> None:
     """
     Load Pocket TTS and the selected voice once.
     """
-    global _tts, _voice_state
+
+    global _tts
+    global _voice_state
 
     with _tts_init_lock:
-        if _tts is not None and _voice_state is not None:
+        if (
+            _tts is not None
+            and _voice_state is not None
+        ):
             return
 
-        LOGGER.info("Loading Pocket TTS...")
+        LOGGER.info(
+            "Loading Pocket TTS..."
+        )
 
         model = TTSModel.load_model(
             language=LANGUAGE,
             sampler_decode_steps=SAMPLER_DECODE_STEPS,
         )
 
-        voice_state = model.get_state_for_audio_prompt(VOICE)
+        voice_state = model.get_state_for_audio_prompt(
+            VOICE
+        )
 
         _tts = model
         _voice_state = voice_state
 
-        LOGGER.info("Pocket TTS loaded.")
+        LOGGER.info(
+            "Pocket TTS loaded. voice=%s language=%s",
+            VOICE,
+            LANGUAGE,
+        )
 
 
 # ============================================================================
@@ -160,7 +191,9 @@ def _current_generation_id() -> int:
         return _generation_id
 
 
-def _is_current_generation(generation_id: int) -> bool:
+def _is_current_generation(
+    generation_id: int,
+) -> bool:
     with _generation_lock:
         return generation_id == _generation_id
 
@@ -170,15 +203,22 @@ def _is_current_generation(generation_id: int) -> bool:
 # ============================================================================
 
 _states: dict[int, GenerationState] = {}
+
 _states_lock = threading.RLock()
 
 
-def _get_state(generation_id: int) -> GenerationState | None:
+def _get_state(
+    generation_id: int,
+) -> GenerationState | None:
+
     with _states_lock:
         return _states.get(generation_id)
 
 
-def _cancel_state(generation_id: int) -> None:
+def _cancel_state(
+    generation_id: int,
+) -> None:
+
     state = _get_state(generation_id)
 
     if state is None:
@@ -189,7 +229,10 @@ def _cancel_state(generation_id: int) -> None:
         state.speech_complete_event.set()
 
 
-def _install_state(state: GenerationState) -> None:
+def _install_state(
+    state: GenerationState,
+) -> None:
+
     with _states_lock:
         _states.clear()
         _states[state.generation_id] = state
@@ -203,7 +246,9 @@ _generation_queue: queue.Queue[SpeechRequest] = queue.Queue(
     maxsize=MAX_GENERATION_QUEUE,
 )
 
-_audio_queue: queue.Queue[tuple[int, np.ndarray]] = queue.Queue(
+_audio_queue: queue.Queue[
+    tuple[int, np.ndarray]
+] = queue.Queue(
     maxsize=MAX_AUDIO_QUEUE,
 )
 
@@ -211,6 +256,7 @@ _audio_event = threading.Event()
 
 
 def _clear_generation_queue() -> None:
+
     while True:
         try:
             _generation_queue.get_nowait()
@@ -221,6 +267,7 @@ def _clear_generation_queue() -> None:
 
 
 def _clear_audio_queue() -> None:
+
     while True:
         try:
             _audio_queue.get_nowait()
@@ -236,6 +283,7 @@ def _clear_audio_queue() -> None:
 # ============================================================================
 
 _audio_stream: sd.OutputStream | None = None
+
 _audio_stream_lock = threading.RLock()
 
 
@@ -243,15 +291,16 @@ def _get_audio_stream() -> sd.OutputStream:
     """
     Return a persistent sounddevice output stream.
 
-    This replaces the Linux-only `aplay` subprocess.
-
-    On Windows this sends 24 kHz mono float32 PCM directly to the
-    configured output device.
+    On Windows this sends 24 kHz mono float32 PCM directly
+    to the configured output device.
     """
+
     global _audio_stream
 
     with _audio_stream_lock:
+
         if _audio_stream is not None:
+
             try:
                 if _audio_stream.active:
                     return _audio_stream
@@ -296,12 +345,14 @@ def _stop_audio_stream() -> None:
     """
     Immediately stop and close the current output stream.
 
-    Closing the stream is intentional for barge-in: any buffered audio
-    is discarded immediately.
+    Closing the stream intentionally discards buffered audio,
+    which gives ZOE immediate barge-in behavior.
     """
+
     global _audio_stream
 
     with _audio_stream_lock:
+
         stream = _audio_stream
         _audio_stream = None
 
@@ -322,25 +373,32 @@ def _stop_audio_stream() -> None:
             )
 
 
-def _play_pcm(pcm: np.ndarray) -> None:
+def _play_pcm(
+    pcm: np.ndarray,
+) -> None:
     """
     Play int16 mono PCM through sounddevice.
 
-    Pocket TTS produces float audio which is converted to int16 for
-    compatibility with the existing pipeline. sounddevice receives
-    normalized float32 samples.
+    The Pocket TTS output is converted to int16 internally,
+    then normalized to float32 for sounddevice.
     """
+
     if pcm.size == 0:
         return
 
-    # Convert int16 PCM back to normalized float32 for PortAudio.
-    samples = pcm.astype(np.float32) / 32768.0
+    samples = (
+        pcm.astype(
+            np.float32,
+            copy=False,
+        )
+        / 32768.0
+    )
 
     stream = _get_audio_stream()
 
-    # sounddevice blocks until the supplied audio has been accepted.
-    # This preserves the existing queue/backpressure model.
-    stream.write(samples.reshape(-1, 1))
+    stream.write(
+        samples.reshape(-1, 1)
+    )
 
 
 # ============================================================================
@@ -348,6 +406,7 @@ def _play_pcm(pcm: np.ndarray) -> None:
 # ============================================================================
 
 _speaking = False
+
 _speaking_lock = threading.Lock()
 
 
@@ -356,7 +415,10 @@ def is_speaking() -> bool:
         return _speaking
 
 
-def _set_speaking(value: bool) -> None:
+def _set_speaking(
+    value: bool,
+) -> None:
+
     global _speaking
 
     with _speaking_lock:
@@ -367,43 +429,51 @@ def _set_speaking(value: bool) -> None:
 # TEXT NORMALIZATION
 # ============================================================================
 
+# Acronyms that should remain recognizable to Pocket TTS.
+#
+# The letter/digit boundary pass happens separately:
+#
+#   T480    -> T 480
+#   RTX4090 -> RTX 4090
+#   USB3    -> USB 3
+
 _ACRONYMS = {
-    "AI": "A I",
-    "API": "A P I",
-    "CPU": "C P U",
-    "GPU": "G P U",
-    "RAM": "R A M",
-    "ROM": "R O M",
-    "SSD": "S S D",
-    "HDD": "H D D",
-    "USB": "U S B",
-    "HDMI": "H D M I",
-    "HTTP": "H T T P",
-    "HTTPS": "H T T P S",
-    "URL": "U R L",
-    "UI": "U I",
-    "UX": "U X",
-    "OS": "O S",
-    "PC": "P C",
-    "FPS": "F P S",
-    "DNS": "D N S",
-    "IP": "I P",
-    "TCP": "T C P",
-    "UDP": "U D P",
-    "SSH": "S S H",
-    "LLM": "L L M",
-    "STT": "S T T",
-    "TTS": "T T S",
-    "VAD": "V A D",
-    "NLP": "N L P",
-    "JSON": "J S O N",
-    "XML": "X M L",
-    "HTML": "H T M L",
-    "CSS": "C S S",
-    "JS": "J S",
-    "JSX": "J S X",
-    "CLI": "C L I",
-    "GUI": "G U I",
+    "AI": "AI",
+    "API": "API",
+    "CPU": "CPU",
+    "GPU": "GPU",
+    "RAM": "RAM",
+    "ROM": "ROM",
+    "SSD": "SSD",
+    "HDD": "HDD",
+    "USB": "USB",
+    "HDMI": "HDMI",
+    "HTTP": "HTTP",
+    "HTTPS": "HTTPS",
+    "URL": "URL",
+    "UI": "UI",
+    "UX": "UX",
+    "OS": "OS",
+    "PC": "PC",
+    "FPS": "FPS",
+    "DNS": "DNS",
+    "IP": "IP",
+    "TCP": "TCP",
+    "UDP": "UDP",
+    "SSH": "SSH",
+    "LLM": "LLM",
+    "STT": "STT",
+    "TTS": "TTS",
+    "VAD": "VAD",
+    "NLP": "NLP",
+    "JSON": "JSON",
+    "XML": "XML",
+    "HTML": "HTML",
+    "CSS": "CSS",
+    "JS": "JS",
+    "JSX": "JSX",
+    "CLI": "CLI",
+    "GUI": "GUI",
     "WiFi": "Wi-Fi",
     "ZOE": "Zoe",
 }
@@ -412,11 +482,16 @@ _ACRONYM_PATTERN = re.compile(
     r"\b("
     + "|".join(
         re.escape(key)
-        for key in sorted(_ACRONYMS, key=len, reverse=True)
+        for key in sorted(
+            _ACRONYMS,
+            key=len,
+            reverse=True,
+        )
     )
     + r")\b",
     re.IGNORECASE,
 )
+
 
 _DIGIT_WORDS = {
     "0": "zero",
@@ -430,6 +505,7 @@ _DIGIT_WORDS = {
     "8": "eight",
     "9": "nine",
 }
+
 
 _NUMBER_WORDS = (
     "zero",
@@ -454,6 +530,7 @@ _NUMBER_WORDS = (
     "nineteen",
 )
 
+
 _TENS = {
     20: "twenty",
     30: "thirty",
@@ -464,6 +541,199 @@ _TENS = {
     80: "eighty",
     90: "ninety",
 }
+
+
+# ---------------------------------------------------------------------------
+# Letter -> number boundary
+#
+# IMPORTANT:
+#
+#   T480      -> T 480
+#   RTX4090   -> RTX 4090
+#   iPhone15  -> iPhone 15
+#   USB3      -> USB 3
+#   A320      -> A 320
+#
+# But:
+#
+#   5G        -> 5G
+#   2FA       -> 2FA
+#
+# We intentionally do NOT split digit -> letter.
+# ---------------------------------------------------------------------------
+
+_LETTER_NUMBER_PATTERN = re.compile(
+    r"(?<=[A-Za-z])(?=\d)"
+)
+
+
+def _split_letter_number_boundaries(
+    text: str,
+) -> str:
+    return _LETTER_NUMBER_PATTERN.sub(
+        " ",
+        text,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Number conversion
+# ---------------------------------------------------------------------------
+
+def _number_to_words(
+    number: int,
+) -> str:
+
+    if number < 0:
+        return (
+            "minus "
+            + _number_to_words(-number)
+        )
+
+    if number < 20:
+        return _NUMBER_WORDS[number]
+
+    if number < 100:
+
+        tens = (
+            number // 10
+        ) * 10
+
+        remainder = number % 10
+
+        return (
+            _TENS[tens]
+            + (
+                f" {_NUMBER_WORDS[remainder]}"
+                if remainder
+                else ""
+            )
+        )
+
+    if number < 1000:
+
+        hundreds = number // 100
+        remainder = number % 100
+
+        result = (
+            f"{_NUMBER_WORDS[hundreds]} hundred"
+        )
+
+        return (
+            result
+            + (
+                f" {_number_to_words(remainder)}"
+                if remainder
+                else ""
+            )
+        )
+
+    for scale, name in (
+        (1_000_000_000, "billion"),
+        (1_000_000, "million"),
+        (1_000, "thousand"),
+    ):
+
+        if number >= scale:
+
+            major, remainder = divmod(
+                number,
+                scale,
+            )
+
+            result = (
+                f"{_number_to_words(major)} {name}"
+            )
+
+            return (
+                result
+                + (
+                    f" {_number_to_words(remainder)}"
+                    if remainder
+                    else ""
+                )
+            )
+
+    return str(number)
+
+
+# ---------------------------------------------------------------------------
+# Markdown cleanup
+# ---------------------------------------------------------------------------
+
+def _clean_markdown(
+    text: str,
+) -> str:
+
+    # Remove fenced code blocks.
+    text = re.sub(
+        r"```.*?```",
+        "",
+        text,
+        flags=re.DOTALL,
+    )
+
+    # Markdown links -> visible text.
+    text = re.sub(
+        r"\[([^\]]+)\]\([^)]+\)",
+        r"\1",
+        text,
+    )
+
+    # Inline code.
+    text = re.sub(
+        r"`([^`]+)`",
+        r"\1",
+        text,
+    )
+
+    # Headings.
+    text = re.sub(
+        r"(?m)^\s*#{1,6}\s*",
+        "",
+        text,
+    )
+
+    # Bullets.
+    text = re.sub(
+        r"(?m)^\s*[-*•]\s+",
+        "",
+        text,
+    )
+
+    # Horizontal rules.
+    text = re.sub(
+        r"(?m)^\s*[_*-]{3,}\s*$",
+        "",
+        text,
+    )
+
+    text = text.replace(
+        "**",
+        "",
+    )
+
+    text = text.replace(
+        "__",
+        "",
+    )
+
+    text = text.replace(
+        "*",
+        "",
+    )
+
+    text = text.replace(
+        "_",
+        " ",
+    )
+
+    return text
+
+
+# ---------------------------------------------------------------------------
+# Security / verification codes
+# ---------------------------------------------------------------------------
 
 _SECURITY_PATTERN = re.compile(
     r"\b("
@@ -480,148 +750,15 @@ _SECURITY_PATTERN = re.compile(
     re.IGNORECASE,
 )
 
-_DECIMAL_PATTERN = re.compile(
-    r"(?<![\w.])-?\d+\.\d+(?![\w.])",
-)
 
-_PERCENT_PATTERN = re.compile(
-    r"(?<![\w.])-?\d+(?:\.\d+)?%",
-)
+def _replace_security_codes(
+    text: str,
+) -> str:
 
-_TEMPERATURE_PATTERN = re.compile(
-    r"(-?\d+(?:\.\d+)?)\s*(?:°|degrees?)\s*"
-    r"(C|F|Celsius|Fahrenheit)\b",
-    re.IGNORECASE,
-)
+    def replace(
+        match: re.Match[str],
+    ) -> str:
 
-_TIME_12_PATTERN = re.compile(
-    r"\b(0?\d|1[0-2]):([0-5]\d)\s*(A M|P M)\b",
-    re.IGNORECASE,
-)
-
-_TIME_24_PATTERN = re.compile(
-    r"\b([01]?\d|2[0-3]):([0-5]\d)\b",
-)
-
-_URL_PATTERN = re.compile(
-    r"\b(?:https?://|www\.)[^\s<>\"]+",
-    re.IGNORECASE,
-)
-
-_EMAIL_PATTERN = re.compile(
-    r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b",
-)
-
-_DATE_PATTERN = re.compile(
-    r"\b("
-    r"January|February|March|April|May|June|July|August|"
-    r"September|October|November|December"
-    r")\s+(\d{1,2})(?:st|nd|rd|th)?"
-    r"(?:,\s+|\s+)(\d{4})\b",
-    re.IGNORECASE,
-)
-
-_INTEGER_PATTERN = re.compile(
-    r"(?<![\w.])-?\d[\d,]*(?![\w.])",
-)
-
-
-def _number_to_words(number: int) -> str:
-    if number < 0:
-        return "minus " + _number_to_words(-number)
-
-    if number < 20:
-        return _NUMBER_WORDS[number]
-
-    if number < 100:
-        tens = (number // 10) * 10
-        remainder = number % 10
-
-        return _TENS[tens] + (
-            f" {_NUMBER_WORDS[remainder]}"
-            if remainder
-            else ""
-        )
-
-    if number < 1000:
-        hundreds = number // 100
-        remainder = number % 100
-
-        result = f"{_NUMBER_WORDS[hundreds]} hundred"
-
-        return result + (
-            f" {_number_to_words(remainder)}"
-            if remainder
-            else ""
-        )
-
-    for scale, name in (
-        (1_000_000_000, "billion"),
-        (1_000_000, "million"),
-        (1_000, "thousand"),
-    ):
-        if number >= scale:
-            major, remainder = divmod(number, scale)
-
-            result = f"{_number_to_words(major)} {name}"
-
-            return result + (
-                f" {_number_to_words(remainder)}"
-                if remainder
-                else ""
-            )
-
-    return str(number)
-
-
-def _clean_markdown(text: str) -> str:
-    text = re.sub(
-        r"```.*?```",
-        "",
-        text,
-        flags=re.DOTALL,
-    )
-
-    text = re.sub(
-        r"\[([^\]]+)\]\([^)]+\)",
-        r"\1",
-        text,
-    )
-
-    text = re.sub(
-        r"`([^`]+)`",
-        r"\1",
-        text,
-    )
-
-    text = re.sub(
-        r"(?m)^\s*#{1,6}\s*",
-        "",
-        text,
-    )
-
-    text = re.sub(
-        r"(?m)^\s*[-*•]\s+",
-        "",
-        text,
-    )
-
-    text = re.sub(
-        r"(?m)^\s*_{3,}\s*$",
-        "",
-        text,
-    )
-
-    text = text.replace("**", "")
-    text = text.replace("__", "")
-    text = text.replace("*", "")
-    text = text.replace("_", " ")
-
-    return text
-
-
-def _replace_security_codes(text: str) -> str:
-    def replace(match: re.Match[str]) -> str:
         label = match.group(1)
         code = match.group(2)
 
@@ -630,7 +767,9 @@ def _replace_security_codes(text: str) -> str:
             for digit in code
         )
 
-        return f"{label} {spoken}"
+        return (
+            f"{label} {spoken}"
+        )
 
     return _SECURITY_PATTERN.sub(
         replace,
@@ -638,29 +777,47 @@ def _replace_security_codes(text: str) -> str:
     )
 
 
-def _replace_decimals(text: str) -> str:
-    def replace(match: re.Match[str]) -> str:
+# ---------------------------------------------------------------------------
+# Decimals
+# ---------------------------------------------------------------------------
+
+_DECIMAL_PATTERN = re.compile(
+    r"(?<![\w.])-?\d+\.\d+(?![\w.])",
+)
+
+
+def _replace_decimals(
+    text: str,
+) -> str:
+
+    def replace(
+        match: re.Match[str],
+    ) -> str:
+
         raw = match.group(0)
 
         negative = raw.startswith("-")
 
-        raw = raw[1:] if negative else raw
+        if negative:
+            raw = raw[1:]
 
-        whole, decimal = raw.split(".", 1)
+        whole, decimal = raw.split(
+            ".",
+            1,
+        )
 
         result = (
             f"{_number_to_words(int(whole))} point "
             + " ".join(
-                _DIGIT_WORDS[d]
-                for d in decimal
+                _DIGIT_WORDS[digit]
+                for digit in decimal
             )
         )
 
-        return (
-            "minus " + result
-            if negative
-            else result
-        )
+        if negative:
+            return "minus " + result
+
+        return result
 
     return _DECIMAL_PATTERN.sub(
         replace,
@@ -668,8 +825,23 @@ def _replace_decimals(text: str) -> str:
     )
 
 
-def _replace_percentages(text: str) -> str:
-    def replace(match: re.Match[str]) -> str:
+# ---------------------------------------------------------------------------
+# Percentages
+# ---------------------------------------------------------------------------
+
+_PERCENT_PATTERN = re.compile(
+    r"(?<![\w.])-?\d+(?:\.\d+)?%",
+)
+
+
+def _replace_percentages(
+    text: str,
+) -> str:
+
+    def replace(
+        match: re.Match[str],
+    ) -> str:
+
         value = match.group(0)[:-1]
 
         if "." in value:
@@ -687,24 +859,50 @@ def _replace_percentages(text: str) -> str:
     )
 
 
-def _replace_temperatures(text: str) -> str:
-    def replace(match: re.Match[str]) -> str:
+# ---------------------------------------------------------------------------
+# Temperatures
+# ---------------------------------------------------------------------------
+
+_TEMPERATURE_PATTERN = re.compile(
+    r"(-?\d+(?:\.\d+)?)\s*"
+    r"(?:°|degrees?)\s*"
+    r"(C|F|Celsius|Fahrenheit)\b",
+    re.IGNORECASE,
+)
+
+
+def _replace_temperatures(
+    text: str,
+) -> str:
+
+    def replace(
+        match: re.Match[str],
+    ) -> str:
+
         value = match.group(1)
         unit = match.group(2).lower()
 
         unit_text = (
             "degrees Celsius"
-            if unit in {"c", "celsius"}
+            if unit in {
+                "c",
+                "celsius",
+            }
             else "degrees Fahrenheit"
         )
 
-        value_text = (
-            _replace_decimals(value)
-            if "." in value
-            else _number_to_words(int(value))
-        )
+        if "." in value:
+            value_text = _replace_decimals(
+                value
+            )
+        else:
+            value_text = _number_to_words(
+                int(value)
+            )
 
-        return f"{value_text} {unit_text}"
+        return (
+            f"{value_text} {unit_text}"
+        )
 
     return _TEMPERATURE_PATTERN.sub(
         replace,
@@ -712,18 +910,54 @@ def _replace_temperatures(text: str) -> str:
     )
 
 
-def _replace_times(text: str) -> str:
-    def replace_12(match: re.Match[str]) -> str:
+# ---------------------------------------------------------------------------
+# Times
+# ---------------------------------------------------------------------------
+
+_TIME_12_PATTERN = re.compile(
+    r"\b(0?\d|1[0-2]):([0-5]\d)\s*(AM|PM)\b",
+    re.IGNORECASE,
+)
+
+
+_TIME_24_PATTERN = re.compile(
+    r"\b([01]?\d|2[0-3]):([0-5]\d)\b",
+)
+
+
+def _replace_times(
+    text: str,
+) -> str:
+
+    def _period_spoken(
+        period: str,
+    ) -> str:
+
+        if period.upper() == "AM":
+            return "A M"
+
+        return "P M"
+
+    def replace_12(
+        match: re.Match[str],
+    ) -> str:
+
         hour = int(match.group(1))
         minute = int(match.group(2))
-        period = match.group(3).lower()
+        period = _period_spoken(
+            match.group(3)
+        )
 
         if minute == 0:
-            return f"{_number_to_words(hour)} {period}"
+            return (
+                f"{_number_to_words(hour)} "
+                f"{period}"
+            )
 
         return (
             f"{_number_to_words(hour)} "
-            f"{_number_to_words(minute)} {period}"
+            f"{_number_to_words(minute)} "
+            f"{period}"
         )
 
     text = _TIME_12_PATTERN.sub(
@@ -731,13 +965,22 @@ def _replace_times(text: str) -> str:
         text,
     )
 
-    def replace_24(match: re.Match[str]) -> str:
+    def replace_24(
+        match: re.Match[str],
+    ) -> str:
+
         hour = int(match.group(1))
         minute = int(match.group(2))
 
-        period = "PM" if hour >= 12 else "AM"
+        period = (
+            "P M"
+            if hour >= 12
+            else "A M"
+        )
 
-        display_hour = hour % 12 or 12
+        display_hour = (
+            hour % 12 or 12
+        )
 
         if minute == 0:
             return (
@@ -757,14 +1000,35 @@ def _replace_times(text: str) -> str:
     )
 
 
-def _replace_urls(text: str) -> str:
-    def replace(match: re.Match[str]) -> str:
+# ---------------------------------------------------------------------------
+# URLs
+# ---------------------------------------------------------------------------
+
+_URL_PATTERN = re.compile(
+    r"\b(?:https?://|www\.)[^\s<>\"']+",
+    re.IGNORECASE,
+)
+
+
+def _replace_urls(
+    text: str,
+) -> str:
+
+    def replace(
+        match: re.Match[str],
+    ) -> str:
+
         value = match.group(0)
 
         trailing = ""
 
-        while value and value[-1] in ".,!?;:)":
-            trailing = value[-1] + trailing
+        while value and value[-1] in (
+            ".,!?;:)"
+        ):
+            trailing = (
+                value[-1]
+                + trailing
+            )
             value = value[:-1]
 
         value = re.sub(
@@ -801,7 +1065,10 @@ def _replace_urls(text: str) -> str:
             " dot ",
         )
 
-        return value + trailing
+        return (
+            value
+            + trailing
+        )
 
     return _URL_PATTERN.sub(
         replace,
@@ -809,16 +1076,49 @@ def _replace_urls(text: str) -> str:
     )
 
 
-def _replace_emails(text: str) -> str:
-    def replace(match: re.Match[str]) -> str:
+# ---------------------------------------------------------------------------
+# Email addresses
+# ---------------------------------------------------------------------------
+
+_EMAIL_PATTERN = re.compile(
+    r"\b"
+    r"[A-Za-z0-9._%+-]+"
+    r"@"
+    r"[A-Za-z0-9.-]+"
+    r"\."
+    r"[A-Za-z]{2,}"
+    r"\b",
+)
+
+
+def _replace_emails(
+    text: str,
+) -> str:
+
+    def replace(
+        match: re.Match[str],
+    ) -> str:
+
         value = match.group(0)
 
         return (
             value
-            .replace("@", " at ")
-            .replace(".", " dot ")
-            .replace("_", " underscore ")
-            .replace("-", " dash ")
+            .replace(
+                "@",
+                " at ",
+            )
+            .replace(
+                ".",
+                " dot ",
+            )
+            .replace(
+                "_",
+                " underscore ",
+            )
+            .replace(
+                "-",
+                " dash ",
+            )
         )
 
     return _EMAIL_PATTERN.sub(
@@ -827,8 +1127,31 @@ def _replace_emails(text: str) -> str:
     )
 
 
-def _replace_dates(text: str) -> str:
-    def replace(match: re.Match[str]) -> str:
+# ---------------------------------------------------------------------------
+# Dates
+# ---------------------------------------------------------------------------
+
+_DATE_PATTERN = re.compile(
+    r"\b("
+    r"January|February|March|April|May|June|July|August|"
+    r"September|October|November|December"
+    r")\s+"
+    r"(\d{1,2})"
+    r"(?:st|nd|rd|th)?"
+    r"(?:,\s+|\s+)"
+    r"(\d{4})\b",
+    re.IGNORECASE,
+)
+
+
+def _replace_dates(
+    text: str,
+) -> str:
+
+    def replace(
+        match: re.Match[str],
+    ) -> str:
+
         month = match.group(1)
         day = int(match.group(2))
         year = int(match.group(3))
@@ -845,8 +1168,18 @@ def _replace_dates(text: str) -> str:
     )
 
 
-def _replace_acronyms(text: str) -> str:
-    def replace(match: re.Match[str]) -> str:
+# ---------------------------------------------------------------------------
+# Acronyms
+# ---------------------------------------------------------------------------
+
+def _replace_acronyms(
+    text: str,
+) -> str:
+
+    def replace(
+        match: re.Match[str],
+    ) -> str:
+
         original = match.group(1)
 
         return _ACRONYMS.get(
@@ -860,7 +1193,14 @@ def _replace_acronyms(text: str) -> str:
     )
 
 
-def _normalize_symbols(text: str) -> str:
+# ---------------------------------------------------------------------------
+# Symbols
+# ---------------------------------------------------------------------------
+
+def _normalize_symbols(
+    text: str,
+) -> str:
+
     replacements = {
         "&": " and ",
         "+": " plus ",
@@ -879,18 +1219,38 @@ def _normalize_symbols(text: str) -> str:
     return text
 
 
-def _replace_integers(text: str) -> str:
-    def replace(match: re.Match[str]) -> str:
+# ---------------------------------------------------------------------------
+# Integers
+# ---------------------------------------------------------------------------
+
+_INTEGER_PATTERN = re.compile(
+    r"(?<![\w.])-?\d[\d,]*(?![\w.])",
+)
+
+
+def _replace_integers(
+    text: str,
+) -> str:
+
+    def replace(
+        match: re.Match[str],
+    ) -> str:
+
         raw = match.group(0)
 
         try:
             number = int(
-                raw.replace(",", "")
+                raw.replace(
+                    ",",
+                    "",
+                )
             )
         except ValueError:
             return raw
 
-        return _number_to_words(number)
+        return _number_to_words(
+            number
+        )
 
     return _INTEGER_PATTERN.sub(
         replace,
@@ -898,30 +1258,66 @@ def _replace_integers(text: str) -> str:
     )
 
 
-def _normalize_speech(text: str) -> str:
-    text = str(text or "").strip()
+# ============================================================================
+# MASTER NORMALIZER
+# ============================================================================
+
+def _normalize_speech(
+    text: str,
+) -> str:
+
+    text = str(
+        text or ""
+    ).strip()
 
     if not text:
         return ""
 
+    # Markdown first.
     text = _clean_markdown(text)
+
+    # IMPORTANT:
+    #
+    # Split model/product names before numeric normalization.
+    #
+    # T480 -> T 480
+    # RTX4090 -> RTX 4090
+    # iPhone15 -> iPhone 15
+    #
+    text = _split_letter_number_boundaries(
+        text
+    )
+
+    # Structured text.
     text = _replace_emails(text)
     text = _replace_urls(text)
+
+    # Security codes must be handled before
+    # generic integer conversion.
     text = _replace_security_codes(text)
+
     text = _replace_dates(text)
     text = _replace_times(text)
     text = _replace_temperatures(text)
     text = _replace_percentages(text)
     text = _replace_decimals(text)
+
+    # Acronyms after model splitting.
     text = _replace_acronyms(text)
+
     text = _normalize_symbols(text)
+
+    # Remaining ordinary integers.
     text = _replace_integers(text)
 
-    return re.sub(
+    # Collapse whitespace.
+    text = re.sub(
         r"\s+",
         " ",
         text,
     ).strip()
+
+    return text
 
 
 # ============================================================================
@@ -933,25 +1329,32 @@ _SENTENCE_PATTERN = re.compile(
 )
 
 
-def _split_long_segment(text: str) -> list[str]:
+def _split_long_segment(
+    text: str,
+) -> list[str]:
+
     words = text.split()
 
     if not words:
         return []
 
     chunks: list[str] = []
+
     current: list[str] = []
     length = 0
 
     for word in words:
+
         extra = len(word) + (
             1 if current else 0
         )
 
         if (
             current
-            and length + extra > MAX_CHUNK_LENGTH
+            and length + extra
+            > MAX_CHUNK_LENGTH
         ):
+
             chunks.append(
                 " ".join(current)
             )
@@ -960,6 +1363,7 @@ def _split_long_segment(text: str) -> list[str]:
             length = len(word)
 
         else:
+
             current.append(word)
             length += extra
 
@@ -971,8 +1375,13 @@ def _split_long_segment(text: str) -> list[str]:
     return chunks
 
 
-def _split_sentences(text: str) -> list[str]:
-    normalized = _normalize_speech(text)
+def _split_sentences(
+    text: str,
+) -> list[str]:
+
+    normalized = _normalize_speech(
+        text
+    )
 
     if not normalized:
         return []
@@ -984,16 +1393,22 @@ def _split_sentences(text: str) -> list[str]:
     chunks: list[str] = []
 
     for sentence in sentences:
+
         sentence = sentence.strip()
 
         if not sentence:
             continue
 
         if len(sentence) <= MAX_CHUNK_LENGTH:
+
             chunks.append(sentence)
+
         else:
+
             chunks.extend(
-                _split_long_segment(sentence)
+                _split_long_segment(
+                    sentence
+                )
             )
 
     return chunks
@@ -1003,7 +1418,10 @@ def _split_sentences(text: str) -> list[str]:
 # PCM CONVERSION
 # ============================================================================
 
-def _audio_to_pcm(audio: object) -> np.ndarray:
+def _audio_to_pcm(
+    audio: object,
+) -> np.ndarray:
+
     samples = np.asarray(
         audio,
         dtype=np.float32,
@@ -1015,10 +1433,12 @@ def _audio_to_pcm(audio: object) -> np.ndarray:
             dtype=np.int16,
         )
 
+    # Protect against invalid model output.
     if (
         np.any(samples < -1.0)
         or np.any(samples > 1.0)
     ):
+
         samples = np.clip(
             samples,
             -1.0,
@@ -1043,12 +1463,16 @@ def _fail_generation(
     generation_id: int,
     error: Exception | str,
 ) -> None:
-    state = _get_state(generation_id)
+
+    state = _get_state(
+        generation_id
+    )
 
     if state is None:
         return
 
     with _states_lock:
+
         state.generation_failed = True
         state.generation_finished = True
         state.error = str(error)
@@ -1061,19 +1485,25 @@ def _fail_generation(
         error,
     )
 
-    if _is_current_generation(generation_id):
+    if _is_current_generation(
+        generation_id
+    ):
         _set_speaking(False)
 
 
 def _complete_generation(
     generation_id: int,
 ) -> None:
-    state = _get_state(generation_id)
+
+    state = _get_state(
+        generation_id
+    )
 
     if state is None:
         return
 
     with _states_lock:
+
         if state.playback_finished:
             return
 
@@ -1081,7 +1511,10 @@ def _complete_generation(
 
     state.speech_complete_event.set()
 
-    if _is_current_generation(generation_id):
+    if _is_current_generation(
+        generation_id
+    ):
+
         _set_speaking(False)
 
         LOGGER.debug(
@@ -1097,23 +1530,32 @@ def _complete_generation(
 _shutdown_event = threading.Event()
 
 _workers_started = False
+
 _workers_lock = threading.RLock()
 
 _generation_worker: threading.Thread | None = None
+
 _playback_worker: threading.Thread | None = None
 
 
 def _generation_worker_loop() -> None:
+
     while not _shutdown_event.is_set():
+
         try:
+
             request = _generation_queue.get(
                 timeout=WORKER_POLL
             )
+
         except queue.Empty:
             continue
 
         try:
-            generation_id = request.generation_id
+
+            generation_id = (
+                request.generation_id
+            )
 
             if not _is_current_generation(
                 generation_id
@@ -1141,6 +1583,7 @@ def _generation_worker_loop() -> None:
                     "Pocket TTS is not initialized."
                 )
 
+            # Pocket TTS streaming generation.
             audio_stream = (
                 model.generate_audio_stream(
                     model_state=voice_state,
@@ -1150,6 +1593,7 @@ def _generation_worker_loop() -> None:
             )
 
             for audio in audio_stream:
+
                 if _shutdown_event.is_set():
                     break
 
@@ -1168,12 +1612,16 @@ def _generation_worker_loop() -> None:
                 ):
                     break
 
-                pcm = _audio_to_pcm(audio)
+                pcm = _audio_to_pcm(
+                    audio
+                )
 
                 if pcm.size == 0:
                     continue
 
+                # Backpressure loop.
                 while not _shutdown_event.is_set():
+
                     if not _is_current_generation(
                         generation_id
                     ):
@@ -1190,6 +1638,7 @@ def _generation_worker_loop() -> None:
                         break
 
                     try:
+
                         _audio_queue.put(
                             (
                                 generation_id,
@@ -1197,19 +1646,18 @@ def _generation_worker_loop() -> None:
                             ),
                             timeout=QUEUE_WAIT,
                         )
+
                         break
 
                     except queue.Full:
                         continue
-
-                else:
-                    break
 
                 state = _get_state(
                     generation_id
                 )
 
                 if state is not None:
+
                     state.audio_chunks_enqueued += 1
 
                 _audio_event.set()
@@ -1225,21 +1673,27 @@ def _generation_worker_loop() -> None:
                 )
                 and not state.cancelled
             ):
+
                 state.generated_chunks += 1
 
         except Exception as exc:
+
             if _is_current_generation(
                 request.generation_id
             ):
+
                 _fail_generation(
                     request.generation_id,
                     exc,
                 )
 
         finally:
+
             _generation_queue.task_done()
 
-            generation_id = request.generation_id
+            generation_id = (
+                request.generation_id
+            )
 
             state = _get_state(
                 generation_id
@@ -1253,7 +1707,9 @@ def _generation_worker_loop() -> None:
                 and state.generated_chunks
                 >= state.total_chunks
             ):
+
                 state.generation_finished = True
+
                 _audio_event.set()
 
 
@@ -1262,18 +1718,28 @@ def _generation_worker_loop() -> None:
 # ============================================================================
 
 def _playback_worker_loop() -> None:
+
     active_generation: int | None = None
 
     while not _shutdown_event.is_set():
+
         try:
-            generation_id, pcm = _audio_queue.get(
-                timeout=WORKER_POLL
+
+            generation_id, pcm = (
+                _audio_queue.get(
+                    timeout=WORKER_POLL
+                )
             )
 
         except queue.Empty:
-            current_id = _current_generation_id()
 
-            state = _get_state(current_id)
+            current_id = (
+                _current_generation_id()
+            )
+
+            state = _get_state(
+                current_id
+            )
 
             if (
                 state is not None
@@ -1283,7 +1749,9 @@ def _playback_worker_loop() -> None:
                 and _audio_queue.empty()
                 and state.audio_chunks_enqueued > 0
             ):
+
                 if active_generation == current_id:
+
                     _complete_generation(
                         current_id
                     )
@@ -1293,6 +1761,7 @@ def _playback_worker_loop() -> None:
             continue
 
         try:
+
             if not _is_current_generation(
                 generation_id
             ):
@@ -1310,10 +1779,12 @@ def _playback_worker_loop() -> None:
                 continue
 
             if active_generation != generation_id:
-                # New generation. sounddevice stream is created lazily.
+
                 _get_audio_stream()
 
-                active_generation = generation_id
+                active_generation = (
+                    generation_id
+                )
 
                 state.playback_started = True
 
@@ -1325,6 +1796,7 @@ def _playback_worker_loop() -> None:
             OSError,
             ValueError,
         ) as exc:
+
             LOGGER.error(
                 "Playback failed: %s",
                 exc,
@@ -1340,6 +1812,7 @@ def _playback_worker_loop() -> None:
                     generation_id
                 )
             ):
+
                 _fail_generation(
                     generation_id,
                     exc,
@@ -1350,6 +1823,7 @@ def _playback_worker_loop() -> None:
             active_generation = None
 
         except Exception as exc:
+
             LOGGER.exception(
                 "Playback error."
             )
@@ -1364,6 +1838,7 @@ def _playback_worker_loop() -> None:
                     generation_id
                 )
             ):
+
                 _fail_generation(
                     generation_id,
                     exc,
@@ -1374,7 +1849,9 @@ def _playback_worker_loop() -> None:
             active_generation = None
 
         finally:
+
             _audio_queue.task_done()
+
             _audio_event.set()
 
     _stop_audio_stream()
@@ -1385,11 +1862,13 @@ def _playback_worker_loop() -> None:
 # ============================================================================
 
 def _ensure_workers() -> None:
+
     global _workers_started
     global _generation_worker
     global _playback_worker
 
     with _workers_lock:
+
         if (
             _workers_started
             and _generation_worker is not None
@@ -1437,34 +1916,47 @@ def speak_async(
     """
     Start speech asynchronously.
 
-    New speech replaces speech currently being generated or played.
+    New speech replaces speech currently being
+    generated or played.
     """
 
-    text = str(text or "").strip()
+    text = str(
+        text or ""
+    ).strip()
 
     if not text:
         return None
 
-    chunks = _split_sentences(text)
+    chunks = _split_sentences(
+        text
+    )
 
     if not chunks:
         return None
 
     preload()
+
     _ensure_workers()
 
     with _speak_lock:
-        old_generation = _current_generation_id()
 
-        generation_id = _next_generation_id()
+        old_generation = (
+            _current_generation_id()
+        )
+
+        generation_id = (
+            _next_generation_id()
+        )
 
         # Invalidate old work first.
         if old_generation:
+
             _cancel_state(
                 old_generation
             )
 
         _clear_generation_queue()
+
         _clear_audio_queue()
 
         # Immediately stop currently audible audio.
@@ -1475,11 +1967,16 @@ def speak_async(
             total_chunks=len(chunks),
         )
 
-        _install_state(state)
+        _install_state(
+            state
+        )
 
         _set_speaking(True)
 
-        for sequence, chunk in enumerate(chunks):
+        for sequence, chunk in enumerate(
+            chunks
+        ):
+
             request = SpeechRequest(
                 generation_id=generation_id,
                 sequence=sequence,
@@ -1487,17 +1984,20 @@ def speak_async(
             )
 
             try:
+
                 _generation_queue.put_nowait(
                     request
                 )
 
             except queue.Full:
+
                 state.cancelled = True
                 state.generation_failed = True
                 state.generation_finished = True
                 state.error = (
                     "TTS generation queue is full."
                 )
+
                 state.speech_complete_event.set()
 
                 _set_speaking(False)
@@ -1511,6 +2011,7 @@ def speak_async(
     if on_complete is not None:
 
         def wait_for_completion() -> None:
+
             state.speech_complete_event.wait()
 
             if not _is_current_generation(
@@ -1526,9 +2027,11 @@ def speak_async(
                 return
 
             try:
+
                 on_complete()
 
             except Exception:
+
                 LOGGER.exception(
                     "Completion callback failed."
                 )
@@ -1589,10 +2092,12 @@ def speak(
 
 def stop() -> None:
     """
-    Immediately cancel generation and stop currently audible speech.
+    Immediately cancel generation and stop
+    currently audible speech.
     """
 
     with _speak_lock:
+
         current_generation = (
             _current_generation_id()
         )
@@ -1601,6 +2106,7 @@ def stop() -> None:
         _next_generation_id()
 
         if current_generation:
+
             _cancel_state(
                 current_generation
             )
@@ -1617,7 +2123,8 @@ def stop() -> None:
 
 def shutdown() -> None:
     """
-    Stop speech, terminate workers, and release audio resources.
+    Stop speech, terminate workers,
+    and release audio resources.
     """
 
     global _workers_started
@@ -1625,6 +2132,7 @@ def shutdown() -> None:
     global _playback_worker
 
     with _speak_lock:
+
         _set_speaking(False)
 
         current_generation = (
@@ -1634,6 +2142,7 @@ def shutdown() -> None:
         _next_generation_id()
 
         if current_generation:
+
             _cancel_state(
                 current_generation
             )
@@ -1647,23 +2156,36 @@ def shutdown() -> None:
 
         _stop_audio_stream()
 
-    current_thread = threading.current_thread()
+    current_thread = (
+        threading.current_thread()
+    )
 
     with _workers_lock:
-        generation_worker = _generation_worker
-        playback_worker = _playback_worker
+
+        generation_worker = (
+            _generation_worker
+        )
+
+        playback_worker = (
+            _playback_worker
+        )
 
     for worker in (
         generation_worker,
         playback_worker,
     ):
+
         if (
             worker is not None
             and worker is not current_thread
         ):
-            worker.join(timeout=1.5)
+
+            worker.join(
+                timeout=1.5
+            )
 
     with _workers_lock:
+
         _generation_worker = None
         _playback_worker = None
         _workers_started = False
@@ -1674,7 +2196,7 @@ def shutdown() -> None:
 
 
 # ============================================================================
-# OPTIONAL DIAGNOSTICS
+# DIAGNOSTICS
 # ============================================================================
 
 def get_status() -> dict[str, object]:
@@ -1692,55 +2214,71 @@ def get_status() -> dict[str, object]:
     )
 
     with _audio_stream_lock:
+
         audio_stream_alive = False
 
         if _audio_stream is not None:
+
             try:
+
                 audio_stream_alive = bool(
                     _audio_stream.active
                 )
+
             except Exception:
                 audio_stream_alive = False
 
     return {
         "speaking": is_speaking(),
+
         "generation_id": generation_id,
+
         "generation_queue": (
             _generation_queue.qsize()
         ),
+
         "audio_queue": (
             _audio_queue.qsize()
         ),
+
+        # Kept for compatibility.
         "audio_process_alive": (
             audio_stream_alive
         ),
+
         "audio_stream_alive": (
             audio_stream_alive
         ),
+
         "model_loaded": (
             _tts is not None
             and _voice_state is not None
         ),
+
         "generation_finished": (
             state.generation_finished
             if state
             else False
         ),
+
         "generation_failed": (
             state.generation_failed
             if state
             else False
         ),
+
         "playback_started": (
             state.playback_started
             if state
             else False
         ),
+
         "playback_finished": (
             state.playback_finished
             if state
             else False
         ),
+
         "error": (
             state.error
             if state
@@ -1750,16 +2288,151 @@ def get_status() -> dict[str, object]:
 
 
 # ============================================================================
-# TEST
+# NORMALIZATION TESTS
+# ============================================================================
+
+def _test_normalization() -> None:
+
+    tests = [
+        (
+            "ThinkPad T480",
+            "ThinkPad T four hundred eighty",
+        ),
+        (
+            "RTX4090",
+            "RTX four thousand ninety",
+        ),
+        (
+            "iPhone15",
+            "iPhone fifteen",
+        ),
+        (
+            "USB3",
+            "USB three",
+        ),
+        (
+            "A320",
+            "A three hundred twenty",
+        ),
+        (
+            "5G",
+            "5G",
+        ),
+        (
+            "2FA",
+            "2FA",
+        ),
+        (
+            "CPU and GPU",
+            "CPU and GPU",
+        ),
+        (
+            "27 degrees Celsius",
+            "twenty seven degrees Celsius",
+        ),
+        (
+            "99.5%",
+            "ninety nine point five percent",
+        ),
+        (
+            "3.14",
+            "three point one four",
+        ),
+        (
+            "https://example.com/api/v1",
+            "example dot com slash api slash v one",
+        ),
+        (
+            "zoe@example.com",
+            "zoe at example dot com",
+        ),
+        (
+            "security code 4413796",
+            "security code four four one three seven nine six",
+        ),
+        (
+            "10:30 PM",
+            "ten thirty P M",
+        ),
+        (
+            "192.168.0.101",
+            "192.168.0.101",
+        ),
+    ]
+
+    print()
+    print("=" * 72)
+    print("ZOE TTS NORMALIZATION TESTS")
+    print("=" * 72)
+
+    failures = 0
+
+    for original, expected_contains in tests:
+
+        result = _normalize_speech(
+            original
+        )
+
+        # The exact expected text is intentionally
+        # represented as a semantic substring for
+        # some technical/acronym cases.
+        #
+        # Print everything so it is easy to tune.
+        passed = (
+            expected_contains.lower()
+            in result.lower()
+        )
+
+        if passed:
+            print("[PASS]")
+        else:
+            print("[FAIL]")
+            failures += 1
+
+        print(
+            f"INPUT:    {original}"
+        )
+
+        print(
+            f"OUTPUT:   {result}"
+        )
+
+        print(
+            f"EXPECTED: {expected_contains}"
+        )
+
+        print()
+
+    print("=" * 72)
+
+    if failures:
+        print(
+            f"FAILED: {failures} test(s)"
+        )
+    else:
+        print(
+            "ALL NORMALIZATION TESTS PASSED"
+        )
+
+    print("=" * 72)
+    print()
+
+
+# ============================================================================
+# AUDIO TEST
 # ============================================================================
 
 def _test() -> None:
+
     preload()
 
     text = (
         "Hello Sir. "
         "This is the ZOE Pocket TTS production test. "
         "The CPU and GPU should be spoken naturally. "
+        "The ThinkPad T480 is being tested with an RTX4090 GPU. "
+        "The iPhone15 is another example. "
+        "USB3 is also being tested. "
         "The current temperature is 27 degrees Celsius. "
         "The server is available at "
         "https://example.com/api/v1. "
@@ -1770,12 +2443,19 @@ def _test() -> None:
     )
 
     LOGGER.info(
+        "Normalized test text: %s",
+        _normalize_speech(text),
+    )
+
+    LOGGER.info(
         "Test starting..."
     )
 
     started = time.monotonic()
 
-    success = speak(text)
+    success = speak(
+        text
+    )
 
     LOGGER.info(
         "Test complete: success=%s elapsed=%.2fs",
@@ -1784,17 +2464,65 @@ def _test() -> None:
     )
 
 
-atexit.register(shutdown)
+# ============================================================================
+# CLI
+# ============================================================================
+
+def _main() -> None:
+
+    parser = argparse.ArgumentParser(
+        description="ZOE Pocket TTS"
+    )
+
+    parser.add_argument(
+        "--test",
+        action="store_true",
+        help="Run the audio playback test.",
+    )
+
+    parser.add_argument(
+        "--test-normalization",
+        action="store_true",
+        help="Run text normalization tests.",
+    )
+
+    args = parser.parse_args()
+
+    if args.test_normalization:
+
+        _test_normalization()
+        return
+
+    if args.test:
+
+        _test()
+        return
+
+    # Default behavior when executed directly.
+    _test()
+
+
+# ============================================================================
+# CLEANUP
+# ============================================================================
+
+atexit.register(
+    shutdown
+)
 
 
 if __name__ == "__main__":
+
     try:
-        _test()
+
+        _main()
 
     except KeyboardInterrupt:
+
         LOGGER.info(
             "Interrupted."
         )
 
     finally:
+
         shutdown()
