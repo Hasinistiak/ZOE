@@ -1,4 +1,3 @@
-
 import React, {
     useEffect,
     useRef,
@@ -21,12 +20,14 @@ import {
     NotificationStack,
     ActivityStream,
 } from "./widgets/ZoeSystems";
+
 import GlobalClickSound from "./widgets/GlobalClickSound";
 
 
 const API_BASE = import.meta.env.DEV
     ? ""
     : "http://127.0.0.1:8000";
+
 
 // ============================================================
 // STATE METADATA
@@ -74,6 +75,122 @@ const STATE_META = {
 // ============================================================
 
 const STATE_POLL_INTERVAL = 150;
+
+
+// ============================================================
+// MICROPHONE ICONS
+// ============================================================
+
+function MicrophoneIcon() {
+
+    return (
+        <svg
+            className="zoe-mic-svg"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+        >
+            <rect
+                x="8"
+                y="3"
+                width="8"
+                height="12"
+                rx="4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+            />
+
+            <path
+                d="M5.5 11.5C5.5 15.09 8.41 18 12 18s6.5-2.91 6.5-6.5"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+            />
+
+            <path
+                d="M12 18v3"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+            />
+
+            <path
+                d="M9 21h6"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+            />
+        </svg>
+    );
+
+}
+
+
+function MicrophoneOffIcon() {
+
+    return (
+        <svg
+            className="zoe-mic-svg"
+            viewBox="0 0 24 24"
+            aria-hidden="true"
+        >
+            <rect
+                x="8"
+                y="3"
+                width="8"
+                height="12"
+                rx="4"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+            />
+
+            <path
+                d="M5.5 11.5C5.5 15.09 8.41 18 12 18"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+            />
+
+            <path
+                d="M18.5 11.5C18.5 13.1 17.92 14.56 16.95 15.67"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+            />
+
+            <path
+                d="M12 18v3"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+            />
+
+            <path
+                d="M9 21h6"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.7"
+                strokeLinecap="round"
+            />
+
+            <path
+                d="M4 4l16 16"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="1.9"
+                strokeLinecap="round"
+            />
+        </svg>
+    );
+
+}
 
 
 // ============================================================
@@ -134,11 +251,6 @@ export default function ZoeDashboard() {
 
     // ========================================================
     // BACKGROUND WORK STATE
-    //
-    // Separate from conversational ZOE state.
-    //
-    // This allows the Processing HUD to remain visible after
-    // ZOE has finished speaking while an agent continues work.
     // ========================================================
 
     const [
@@ -149,8 +261,6 @@ export default function ZoeDashboard() {
 
     // ========================================================
     // ACTIVE PAGE
-    //
-    // Only internal ZOE pages remain here.
     // ========================================================
 
     const [
@@ -211,10 +321,6 @@ export default function ZoeDashboard() {
 
     // ========================================================
     // RESPONSE DISPLAY STATE
-    //
-    // Backend response remains the source of truth.
-    //
-    // displayedResponse is only the visual reveal state.
     // ========================================================
 
     const [
@@ -265,15 +371,6 @@ export default function ZoeDashboard() {
 
     // ========================================================
     // TAURI EXTERNAL WINDOW REFS
-    //
-    // Every URL opened by ZOE gets its own native Tauri window.
-    //
-    // openedUrlsRef:
-    // Prevents the 150ms state poller from opening the same
-    // URL repeatedly.
-    //
-    // externalWindowCounterRef:
-    // Gives every Tauri window a unique label.
     // ========================================================
 
     const openedUrlsRef =
@@ -300,10 +397,6 @@ export default function ZoeDashboard() {
                 : "";
 
 
-        // ====================================================
-        // EMPTY URL
-        // ====================================================
-
         if (
             !cleanUrl
         ) {
@@ -312,10 +405,6 @@ export default function ZoeDashboard() {
 
         }
 
-
-        // ====================================================
-        // VALIDATE URL
-        // ====================================================
 
         let parsedUrl;
 
@@ -340,10 +429,6 @@ export default function ZoeDashboard() {
         }
 
 
-        // ====================================================
-        // ONLY ALLOW HTTP / HTTPS
-        // ====================================================
-
         if (
             parsedUrl.protocol !== "http:" &&
             parsedUrl.protocol !== "https:"
@@ -358,10 +443,6 @@ export default function ZoeDashboard() {
 
         }
 
-
-        // ====================================================
-        // DUPLICATE PROTECTION
-        // ====================================================
 
         if (
             openedUrlsRef.current.has(
@@ -379,10 +460,6 @@ export default function ZoeDashboard() {
         );
 
 
-        // ====================================================
-        // UNIQUE WINDOW NUMBER
-        // ====================================================
-
         externalWindowCounterRef.current += 1;
 
 
@@ -390,17 +467,9 @@ export default function ZoeDashboard() {
             externalWindowCounterRef.current;
 
 
-        // ====================================================
-        // UNIQUE TAURI WINDOW LABEL
-        // ====================================================
-
         const label =
             `zoe-external-${windowNumber}`;
 
-
-        // ====================================================
-        // WINDOW TITLE
-        // ====================================================
 
         let hostname =
             parsedUrl.hostname;
@@ -419,10 +488,6 @@ export default function ZoeDashboard() {
 
         }
 
-
-        // ====================================================
-        // CREATE TAURI WEBVIEW WINDOW
-        // ====================================================
 
         try {
 
@@ -459,10 +524,6 @@ export default function ZoeDashboard() {
                 );
 
 
-            // =================================================
-            // WINDOW CREATED
-            // =================================================
-
             await new Promise(
                 (resolve) => {
 
@@ -480,10 +541,6 @@ export default function ZoeDashboard() {
                         }
                     );
 
-
-                    // =========================================
-                    // WINDOW CREATION ERROR
-                    // =========================================
 
                     externalWindow.once(
                         "tauri://error",
@@ -528,22 +585,6 @@ export default function ZoeDashboard() {
 
     // ========================================================
     // RESPONSE TYPING / GENERATION EFFECT
-    //
-    // This creates a ChatGPT-like progressive reveal.
-    //
-    // IMPORTANT:
-    //
-    // /api/state continues returning the same response every
-    // 150ms. We do NOT restart the animation for identical
-    // responses.
-    //
-    // If the backend response grows:
-    //
-    // "Hello"
-    // "Hello, sir"
-    // "Hello, sir. I"
-    //
-    // the animation continues naturally.
     // ========================================================
 
     useEffect(() => {
@@ -553,10 +594,6 @@ export default function ZoeDashboard() {
                 ? response
                 : "";
 
-
-        // ====================================================
-        // CANCEL PREVIOUS ANIMATION
-        // ====================================================
 
         if (
             responseAnimationRef.current
@@ -571,10 +608,6 @@ export default function ZoeDashboard() {
 
         }
 
-
-        // ====================================================
-        // EMPTY RESPONSE
-        // ====================================================
 
         if (
             !target
@@ -595,22 +628,9 @@ export default function ZoeDashboard() {
         }
 
 
-        // ====================================================
-        // PREVIOUS RESPONSE
-        // ====================================================
-
         const previous =
             previousResponseRef.current;
 
-
-        // ====================================================
-        // DETERMINE RESPONSE RELATIONSHIP
-        //
-        // If target is an extension of the previous response,
-        // preserve the current animation position.
-        //
-        // Otherwise this is a new response and we start over.
-        // ====================================================
 
         const isContinuation =
             Boolean(
@@ -634,9 +654,6 @@ export default function ZoeDashboard() {
 
         } else {
 
-            // Never allow the visual index to exceed
-            // the current target length.
-
             responseIndexRef.current =
                 Math.min(
                     responseIndexRef.current,
@@ -650,10 +667,6 @@ export default function ZoeDashboard() {
             target;
 
 
-        // ====================================================
-        // REVEAL FUNCTION
-        // ====================================================
-
         function revealNext() {
 
             const currentTarget =
@@ -663,10 +676,6 @@ export default function ZoeDashboard() {
             const currentIndex =
                 responseIndexRef.current;
 
-
-            // =================================================
-            // GENERATION COMPLETE
-            // =================================================
 
             if (
                 currentIndex >=
@@ -687,25 +696,10 @@ export default function ZoeDashboard() {
             }
 
 
-            // =================================================
-            // REMAINING CHARACTERS
-            // =================================================
-
             const remaining =
                 currentTarget.length -
                 currentIndex;
 
-
-            // =================================================
-            // ADAPTIVE CHUNK SIZE
-            //
-            // Short responses:
-            // 1 character at a time.
-            //
-            // Long responses:
-            // slightly larger chunks so the UI doesn't take
-            // several seconds to finish a large paragraph.
-            // =================================================
 
             let chunkSize =
                 1;
@@ -762,10 +756,6 @@ export default function ZoeDashboard() {
             );
 
 
-            // =================================================
-            // NATURAL GENERATION TIMING
-            // =================================================
-
             const lastChar =
                 currentTarget[
                     nextIndex - 1
@@ -775,9 +765,6 @@ export default function ZoeDashboard() {
             let delay =
                 24;
 
-
-            // Slight pauses around punctuation make it feel
-            // generated rather than mechanically typed.
 
             if (
                 lastChar === "." ||
@@ -823,16 +810,8 @@ export default function ZoeDashboard() {
         }
 
 
-        // ====================================================
-        // START
-        // ====================================================
-
         revealNext();
 
-
-        // ====================================================
-        // CLEANUP
-        // ====================================================
 
         return () => {
 
@@ -856,8 +835,6 @@ export default function ZoeDashboard() {
 
     // ========================================================
     // BACKEND STATE POLLING
-    //
-    // /api/state is the ONLY source of truth.
     // ========================================================
 
     useEffect(() => {
@@ -910,18 +887,10 @@ export default function ZoeDashboard() {
                 }
 
 
-                // ====================================================
-                // ONLINE
-                // ====================================================
-
                 setOnline(
                     data.online === true
                 );
 
-
-                // ====================================================
-                // GLOBAL ZOE STATE
-                // ====================================================
 
                 const currentZoeState =
                     getBackendState(
@@ -934,17 +903,9 @@ export default function ZoeDashboard() {
                 );
 
 
-                // ====================================================
-                // PROCESSING
-                // ====================================================
-
                 const processing =
                     data.processing === true;
 
-
-                // ====================================================
-                // BACKGROUND WORK
-                // ====================================================
 
                 const currentBackgroundWork =
                     resolveBackgroundWork(
@@ -956,10 +917,6 @@ export default function ZoeDashboard() {
                     currentBackgroundWork
                 );
 
-
-                // ====================================================
-                // CINEMATIC PROCESSING HUD
-                // ====================================================
 
                 const currentProcessingState =
                     resolveProcessingMode(
@@ -994,28 +951,16 @@ export default function ZoeDashboard() {
                 );
 
 
-                // ====================================================
-                // MUTED
-                // ====================================================
-
                 setMuted(
                     data.muted === true
                 );
 
-
-                // ====================================================
-                // SURFACE
-                // ====================================================
 
                 setSurface(
                     data.surface ||
                     null
                 );
 
-
-                // ====================================================
-                // NOTIFICATIONS
-                // ====================================================
 
                 if (
                     Array.isArray(
@@ -1030,10 +975,6 @@ export default function ZoeDashboard() {
                 }
 
 
-                // ====================================================
-                // ACTIVITY
-                // ====================================================
-
                 if (
                     Array.isArray(
                         data.activity
@@ -1047,10 +988,6 @@ export default function ZoeDashboard() {
                 }
 
 
-                // ====================================================
-                // RESPONSE
-                // ====================================================
-
                 if (
                     typeof data.response ===
                     "string"
@@ -1062,10 +999,6 @@ export default function ZoeDashboard() {
 
                 }
 
-
-                // ====================================================
-                // EXTERNAL URL
-                // ====================================================
 
                 const backendUrl =
                     typeof data.url === "string"
@@ -1083,10 +1016,6 @@ export default function ZoeDashboard() {
 
                 }
 
-
-                // ====================================================
-                // STT
-                // ====================================================
 
                 const stt =
                     data.stt ||
@@ -1119,10 +1048,6 @@ export default function ZoeDashboard() {
                     );
 
 
-                // ====================================================
-                // STT DISPLAY LIFECYCLE
-                // ====================================================
-
                 if (
                     speaking ||
                     newFinalText ||
@@ -1136,7 +1061,6 @@ export default function ZoeDashboard() {
                         clearTimeout(
                             sttClearTimer.current
                         );
-
 
                         sttClearTimer.current =
                             null;
@@ -1155,10 +1079,6 @@ export default function ZoeDashboard() {
                 }
 
 
-                // ====================================================
-                // NEW FINAL TRANSCRIPT
-                // ====================================================
-
                 if (
                     newFinalText
                 ) {
@@ -1168,10 +1088,6 @@ export default function ZoeDashboard() {
 
                 }
 
-
-                // ====================================================
-                // ZOE SPEAKING
-                // ====================================================
 
                 if (
                     currentZoeState ===
@@ -1183,10 +1099,6 @@ export default function ZoeDashboard() {
 
                 }
 
-
-                // ====================================================
-                // CLEAR STT DISPLAY
-                // ====================================================
 
                 if (
                     currentZoeState ===
@@ -1245,27 +1157,15 @@ export default function ZoeDashboard() {
                 }
 
 
-                // ====================================================
-                // USER SPEAKING
-                // ====================================================
-
                 setUserSpeaking(
                     speaking
                 );
 
 
-                // ====================================================
-                // LIVE STT
-                // ====================================================
-
                 setSttText(
                     liveText
                 );
 
-
-                // ====================================================
-                // FINAL STT
-                // ====================================================
 
                 setFinalSttText(
                     finalText
@@ -1330,16 +1230,8 @@ export default function ZoeDashboard() {
         }
 
 
-        // ====================================================
-        // INITIAL REQUEST
-        // ====================================================
-
         updateState();
 
-
-        // ====================================================
-        // CONTINUOUS STATE POLLING
-        // ====================================================
 
         const interval =
             setInterval(
@@ -1347,10 +1239,6 @@ export default function ZoeDashboard() {
                 STATE_POLL_INTERVAL
             );
 
-
-        // ====================================================
-        // CLEANUP
-        // ====================================================
 
         return () => {
 
@@ -1397,9 +1285,9 @@ export default function ZoeDashboard() {
     }, []);
 
 
-    // ============================================================
+    // ========================================================
     // MUTE / UNMUTE
-    // ============================================================
+    // ========================================================
 
     async function toggleMute() {
 
@@ -1441,10 +1329,6 @@ export default function ZoeDashboard() {
                 data.muted === true
             );
 
-
-            // ==================================================
-            // IMMEDIATELY CLEAN STT WHEN MUTED
-            // ==================================================
 
             if (
                 data.muted === true
@@ -1507,9 +1391,9 @@ export default function ZoeDashboard() {
     }
 
 
-    // ============================================================
+    // ========================================================
     // PAGE NAVIGATION
-    // ============================================================
+    // ========================================================
 
     function openPage(
         page
@@ -1531,9 +1415,9 @@ export default function ZoeDashboard() {
     }
 
 
-    // ============================================================
+    // ========================================================
     // SHOW FINAL TRANSCRIPT
-    // ============================================================
+    // ========================================================
 
     const showingFinal =
         !userSpeaking &&
@@ -1544,9 +1428,9 @@ export default function ZoeDashboard() {
         );
 
 
-    // ============================================================
+    // ========================================================
     // DISPLAYED TRANSCRIPT
-    // ============================================================
+    // ========================================================
 
     let displayedStt =
         "";
@@ -1583,17 +1467,17 @@ export default function ZoeDashboard() {
         displayedStt.trim();
 
 
-    // ============================================================
+    // ========================================================
     // ORB STATE
-    // ============================================================
+    // ========================================================
 
     const orbState =
         zoeState;
 
 
-    // ============================================================
+    // ========================================================
     // FOREGROUND PROCESSING
-    // ============================================================
+    // ========================================================
 
     const foregroundProcessing =
         online &&
@@ -1606,27 +1490,27 @@ export default function ZoeDashboard() {
         );
 
 
-    // ============================================================
+    // ========================================================
     // BACKGROUND PROCESSING
-    // ============================================================
+    // ========================================================
 
     const backgroundProcessing =
         online &&
         backgroundWork?.active === true;
 
 
-    // ============================================================
+    // ========================================================
     // GLOBAL PROCESSING ACTIVITY
-    // ============================================================
+    // ========================================================
 
     const processingActive =
         foregroundProcessing ||
         backgroundProcessing;
 
 
-    // ============================================================
+    // ========================================================
     // EFFECTIVE HUD STATE
-    // ============================================================
+    // ========================================================
 
     const effectiveProcessingState =
         backgroundProcessing
@@ -1634,9 +1518,9 @@ export default function ZoeDashboard() {
             : processingState;
 
 
-    // ============================================================
+    // ========================================================
     // BACKGROUND AGENT NAME
-    // ============================================================
+    // ========================================================
 
     const backgroundAgentName =
         backgroundWork?.name ||
@@ -1646,9 +1530,9 @@ export default function ZoeDashboard() {
         "";
 
 
-    // ============================================================
+    // ========================================================
     // EFFECTIVE HUD OPERATION
-    // ============================================================
+    // ========================================================
 
     const effectiveProcessingOperation =
         backgroundProcessing
@@ -1663,9 +1547,9 @@ export default function ZoeDashboard() {
             : processingOperation;
 
 
-    // ============================================================
+    // ========================================================
     // EFFECTIVE HUD DETAIL
-    // ============================================================
+    // ========================================================
 
     const effectiveProcessingDetail =
         backgroundProcessing
@@ -1681,9 +1565,9 @@ export default function ZoeDashboard() {
             : processingDetail;
 
 
-    // ============================================================
+    // ========================================================
     // VOICE PANEL VISIBILITY
-    // ============================================================
+    // ========================================================
 
     const voicePanelOpen =
         userSpeaking ||
@@ -1691,9 +1575,9 @@ export default function ZoeDashboard() {
         sttDisplayActive;
 
 
-    // ============================================================
+    // ========================================================
     // VOICE STATUS
-    // ============================================================
+    // ========================================================
 
     let voiceStatus =
         "READY";
@@ -1716,9 +1600,9 @@ export default function ZoeDashboard() {
     }
 
 
-    // ============================================================
+    // ========================================================
     // VOICE FOOTER
-    // ============================================================
+    // ========================================================
 
     const voiceFooter =
         showingFinal
@@ -1728,9 +1612,9 @@ export default function ZoeDashboard() {
                 : "READY";
 
 
-    // ============================================================
+    // ========================================================
     // STATE METADATA
-    // ============================================================
+    // ========================================================
 
     const stateMeta =
         STATE_META[
@@ -1739,19 +1623,15 @@ export default function ZoeDashboard() {
         STATE_META.idle;
 
 
-    // ============================================================
+    // ========================================================
     // RENDER ACTIVE PAGE
-    // ============================================================
+    // ========================================================
 
     function renderActivePage() {
 
         switch (
             activePage
         ) {
-
-            // ====================================================
-            // CHAT PAGE
-            // ====================================================
 
             case "chat":
 
@@ -1779,10 +1659,6 @@ export default function ZoeDashboard() {
                 );
 
 
-            // ====================================================
-            // NO OTHER EMBEDDED PAGES
-            // ====================================================
-
             default:
 
                 return null;
@@ -1792,476 +1668,459 @@ export default function ZoeDashboard() {
     }
 
 
-    // ============================================================
+    // ========================================================
     // RENDER
-    // ============================================================
+    // ========================================================
 
     return (
         <>
- <GlobalClickSound />
-        <div
-            className={
-                `zoe-dashboard ${activePage
-                    ? "page-active"
-                    : ""
-                }`
-            }
-            data-orb-state={
-                zoeState
-            }
-            data-active-page={
-                activePage ||
-                "dashboard"
-            }
-            data-processing-state={
-                effectiveProcessingState
-            }
-            data-background-processing={
-                backgroundProcessing
-                    ? "true"
-                    : "false"
-            }
-        >
-
-            {/* ====================================================
-                BACKGROUND
-                ==================================================== */}
-
-            <div className="zoe-bg-grid" />
-
-            <div className="zoe-bg-vignette" />
-
-            <div className="zoe-scanlines" />
-
-
-            {/* ====================================================
-                CINEMATIC PROCESSING HUD
-                ==================================================== */}
-
-            <ProcessingHUD
-                active={
-                    processingActive
-                }
-
-                state={
-                    effectiveProcessingState
-                }
-
-                operation={
-                    effectiveProcessingOperation
-                }
-
-                detail={
-                    effectiveProcessingDetail
-                }
-
-                background={
-                    backgroundProcessing
-                }
-
-                agents={
-                    backgroundWork?.agents || []
-                }
-            />
-
-
-            {/* ====================================================
-                DASHBOARD MODE
-                ==================================================== */}
-
-            {
-                !activePage && (
-
-                    <>
-
-                        <ActivityStream
-                            entries={
-                                activity
-                            }
-                        />
-
-
-                        <NotificationStack
-                            notifications={
-                                notifications
-                            }
-                        />
-
-
-                        <SurfaceStage
-                            surface={
-                                surface
-                            }
-                        />
-
-
-                        {/* ====================================================
-                            HEADER
-                            ==================================================== */}
-
-                        <header className="zoe-topbar">
-
-                            <div className="zoe-brand">
-
-                                <span className="zoe-brand-mark">
-                                    ◈
-                                </span>
-
-
-                                <div className="zoe-brand-text">
-
-                                    <span className="zoe-brand-name">
-                                        Z · O · E
-                                    </span>
-
-                                    <span className="zoe-brand-sub">
-                                        ZENITH ORCHESTRATION ENGINE
-                                    </span>
-
-                                </div>
-
-                            </div>
-
-
-                            <div
-                                className={
-                                    `zoe-status-pill ${online
-                                        ? ""
-                                        : "offline"
-                                    }`
-                                }
-                            >
-
-                                <span className="zoe-status-dot" />
-
-                                <span>
-
-                                    {
-                                        online
-                                            ? stateMeta.label
-                                            : "SYSTEM OFFLINE"
-                                    }
-
-                                </span>
-
-                            </div>
-
-
-                            <Clock />
-
-                        </header>
-
-
-                        {/* ====================================================
-                            MAIN DASHBOARD
-                            ==================================================== */}
-
-                        <main className="zoe-grid">
-
-                            <section
-                                className="
-                                    zoe-col
-                                    zoe-col-center
-                                "
-                            >
-
-                                <div className="zoe-orb-anchor" />
-
-
-                                {/* =================================================
-                                    VOICE INPUT WINDOW
-                                    ================================================= */}
-
-                                <div
-                                    className={
-                                        `zoe-voice-window ${voicePanelOpen
-                                            ? "open"
-                                            : ""
-                                        }`
-                                    }
-                                >
-
-                                    <div className="zoe-voice-window-header">
-
-                                        <div className="zoe-voice-window-title">
-
-                                            <span className="zoe-voice-window-icon">
-                                                ◈
-                                            </span>
-
-
-                                            <div>
-
-                                                <div className="zoe-voice-window-name">
-                                                    VOICE INPUT
-                                                </div>
-
-                                                <div className="zoe-voice-window-status">
-
-                                                    {
-                                                        showingFinal
-                                                            ? "FINAL TRANSCRIPTION"
-                                                            : userSpeaking
-                                                                ? "LIVE TRANSCRIPTION"
-                                                                : "VOICE INPUT"
-                                                    }
-
-                                                </div>
-
-                                            </div>
-
-                                        </div>
-
-
-                                        <div className="zoe-voice-window-indicator">
-
-                                            <span />
-
-                                            {
-                                                voiceStatus
-                                            }
-
-                                        </div>
-
-                                    </div>
-
-
-                                    <div className="zoe-voice-window-line" />
-
-
-                                    <div className="zoe-voice-window-body">
-
-                                        <div className="zoe-voice-wave">
-
-                                            <span />
-                                            <span />
-                                            <span />
-                                            <span />
-                                            <span />
-                                            <span />
-                                            <span />
-
-                                        </div>
-
-
-                                        <div
-                                            className={
-                                                `zoe-voice-text ${showingFinal
-                                                    ? "final"
-                                                    : ""
-                                                }`
-                                            }
-                                        >
-
-                                            {
-                                                displayedStt
-                                            }
-
-                                        </div>
-
-                                    </div>
-
-
-                                    <div className="zoe-voice-window-footer">
-
-                                        <span>
-                                            {
-                                                voiceFooter
-                                            }
-                                        </span>
-
-                                        <span>
-                                            16 kHz / MONO
-                                        </span>
-
-                                    </div>
-
-
-                                    <div className="zoe-voice-corner corner-tl" />
-                                    <div className="zoe-voice-corner corner-tr" />
-                                    <div className="zoe-voice-corner corner-bl" />
-                                    <div className="zoe-voice-corner corner-br" />
-
-                                </div>
-
-
-                                {/* =================================================
-                                    ZOE RESPONSE
-                                    ================================================= */}
-
-                                {
-                                    displayedResponse &&
-                                    displayedResponse.trim() && (
-
-                                        <div className="responsebox">
-
-                                            <div className="zoe-response">
-
-                                                {
-                                                    displayedResponse
-                                                }
-
-
-                                                {/* =================================
-                                                    GENERATION CURSOR
-                                                    ================================= */}
-
-                                                <span
-                                                    className="zoe-response-cursor"
-                                                    aria-hidden="true"
-                                                />
-
-                                            </div>
-
-                                        </div>
-
-                                    )
-                                }
-
-
-                                {/* =================================================
-                                    MICROPHONE
-                                    ================================================= */}
-
-                                <button
-                                    className={
-                                        `zoe-mic ${muted
-                                            ? "muted"
-                                            : ""
-                                        }`
-                                    }
-                                    onClick={
-                                        toggleMute
-                                    }
-                                    aria-label={
-                                        muted
-                                            ? "Unmute ZOE"
-                                            : "Mute ZOE"
-                                    }
-                                    type="button"
-                                >
-
-                                    <span className="zoe-mic-icon">
-
-                                        {
-                                            muted
-                                                ? "MIC OFF"
-                                                : "MIC ON"
-                                        }
-
-                                    </span>
-
-
-                                    <span className="zoe-mic-label">
-
-                                        {
-                                            muted
-                                                ? "MIC MUTED"
-                                                : "MIC ACTIVE"
-                                        }
-
-                                    </span>
-
-                                </button>
-
-
-                                {/* =================================================
-                                    COMMS TRIGGER
-                                    ================================================= */}
-
-                                <button
-                                    className="zoe-comms-trigger"
-                                    onClick={() =>
-                                        openPage(
-                                            "chat"
-                                        )
-                                    }
-                                    aria-label="Open ZOE communications"
-                                    type="button"
-                                >
-
-                                    <span className="zoe-comms-symbol">
-                                        ◇
-                                    </span>
-
-
-                                    <span className="zoe-comms-text">
-
-                                        <span className="zoe-comms-title">
-                                            COMMS
-                                        </span>
-
-                                        <span className="zoe-comms-subtitle">
-                                            ZOE CHANNEL
-                                        </span>
-
-                                    </span>
-
-
-                                    <span className="zoe-comms-pulse" />
-
-                                </button>
-
-                            </section>
-
-                        </main>
-
-                    </>
-
-                )
-            }
-
-
-            {/* ====================================================
-                ACTIVE PAGE
-                ==================================================== */}
-
-            {
-                activePage && (
-
-                    <main className="zoe-page-shell">
-
-                        <div className="zoe-page-content">
-
-                            {
-                                renderActivePage()
-                            }
-
-                        </div>
-
-                    </main>
-
-                )
-            }
-
-
-            {/* ====================================================
-                PERSISTENT ZOE ORB
-                ==================================================== */}
+            <GlobalClickSound />
 
             <div
                 className={
-                    `zoe-persistent-orb ${activePage
-                        ? "page-mode"
-                        : "dashboard-mode"
+                    `zoe-dashboard ${activePage
+                        ? "page-active"
+                        : ""
                     }`
+                }
+
+                data-orb-state={
+                    zoeState
+                }
+
+                data-active-page={
+                    activePage ||
+                    "dashboard"
+                }
+
+                data-processing-state={
+                    effectiveProcessingState
+                }
+
+                data-background-processing={
+                    backgroundProcessing
+                        ? "true"
+                        : "false"
                 }
             >
 
-                <ZoeOrb
-                    label={
-                        orbState
+                {/* ====================================================
+                    BACKGROUND
+                    ==================================================== */}
+
+                <div className="zoe-bg-grid" />
+
+                <div className="zoe-bg-vignette" />
+
+                <div className="zoe-scanlines" />
+
+
+                {/* ====================================================
+                    CINEMATIC PROCESSING HUD
+                    ==================================================== */}
+
+                <ProcessingHUD
+                    active={
+                        processingActive
                     }
+
                     state={
-                        orbState
+                        effectiveProcessingState
+                    }
+
+                    operation={
+                        effectiveProcessingOperation
+                    }
+
+                    detail={
+                        effectiveProcessingDetail
+                    }
+
+                    background={
+                        backgroundProcessing
+                    }
+
+                    agents={
+                        backgroundWork?.agents || []
                     }
                 />
 
+
+                {/* ====================================================
+                    DASHBOARD MODE
+                    ==================================================== */}
+
+                {
+                    !activePage && (
+
+                        <>
+
+                            <ActivityStream
+                                entries={
+                                    activity
+                                }
+                            />
+
+
+                            <NotificationStack
+                                notifications={
+                                    notifications
+                                }
+                            />
+
+
+                            <SurfaceStage
+                                surface={
+                                    surface
+                                }
+                            />
+
+
+                            {/* ====================================================
+                                HEADER
+                                ==================================================== */}
+
+                            <header className="zoe-topbar">
+
+                                <div className="zoe-brand">
+
+                                    <span className="zoe-brand-mark">
+                                        ◈
+                                    </span>
+
+
+                                    <div className="zoe-brand-text">
+
+                                        <span className="zoe-brand-name">
+                                            ZENITH ORCHESTRATION ENGINE
+                                        </span>
+
+                                    </div>
+
+                                </div>
+
+
+                                <div
+                                    className={
+                                        `zoe-status-pill ${online
+                                            ? ""
+                                            : "offline"
+                                        }`
+                                    }
+                                >
+
+                                    <span className="zoe-status-dot" />
+
+                                    <span>
+
+                                        {
+                                            online
+                                                ? stateMeta.label
+                                                : "SYSTEM OFFLINE"
+                                        }
+
+                                    </span>
+
+                                </div>
+
+
+                                <Clock />
+
+                            </header>
+
+
+                            {/* ====================================================
+                                MAIN DASHBOARD
+                                ==================================================== */}
+
+                            <main className="zoe-grid">
+
+                                <section
+                                    className="
+                                        zoe-col
+                                        zoe-col-center
+                                    "
+                                >
+
+                                    <div className="zoe-orb-anchor" />
+
+
+                                    {/* =================================================
+                                        VOICE INPUT WINDOW
+                                        ================================================= */}
+
+                                    <div
+                                        className={
+                                            `zoe-voice-window ${voicePanelOpen
+                                                ? "open"
+                                                : ""
+                                            }`
+                                        }
+                                    >
+
+                                        <div className="zoe-voice-window-header">
+
+                                            <div className="zoe-voice-window-title">
+
+                                                <span className="zoe-voice-window-icon">
+                                                    ◈
+                                                </span>
+
+
+                                                <div>
+
+                                                    <div className="zoe-voice-window-name">
+                                                        VOICE INPUT
+                                                    </div>
+
+                                                    <div className="zoe-voice-window-status">
+
+                                                        {
+                                                            showingFinal
+                                                                ? "FINAL TRANSCRIPTION"
+                                                                : userSpeaking
+                                                                    ? "LIVE TRANSCRIPTION"
+                                                                    : "VOICE INPUT"
+                                                        }
+
+                                                    </div>
+
+                                                </div>
+
+                                            </div>
+
+
+                                            <div className="zoe-voice-window-indicator">
+
+                                                <span />
+
+                                                {
+                                                    voiceStatus
+                                                }
+
+                                            </div>
+
+                                        </div>
+
+
+                                        <div className="zoe-voice-window-line" />
+
+
+                                        <div className="zoe-voice-window-body">
+
+                                            <div className="zoe-voice-wave">
+
+                                                <span />
+                                                <span />
+                                                <span />
+                                                <span />
+                                                <span />
+                                                <span />
+                                                <span />
+
+                                            </div>
+
+
+                                            <div
+                                                className={
+                                                    `zoe-voice-text ${showingFinal
+                                                        ? "final"
+                                                        : ""
+                                                    }`
+                                                }
+                                            >
+
+                                                {
+                                                    displayedStt
+                                                }
+
+                                            </div>
+
+                                        </div>
+
+
+                                        <div className="zoe-voice-window-footer">
+
+                                            <span>
+                                                {
+                                                    voiceFooter
+                                                }
+                                            </span>
+
+                                            <span>
+                                                16 kHz / MONO
+                                            </span>
+
+                                        </div>
+
+
+                                        <div className="zoe-voice-corner corner-tl" />
+                                        <div className="zoe-voice-corner corner-tr" />
+                                        <div className="zoe-voice-corner corner-bl" />
+                                        <div className="zoe-voice-corner corner-br" />
+
+                                    </div>
+
+
+                                    {/* =================================================
+                                        ZOE RESPONSE
+                                        ================================================= */}
+
+                                    {
+                                        displayedResponse &&
+                                        displayedResponse.trim() && (
+
+                                            <button
+                                                className="responsebox"
+                                                type="button"
+                                                onClick={() =>
+                                                    openPage(
+                                                        "chat"
+                                                    )
+                                                }
+                                                aria-label="Open ZOE communications"
+                                            >
+
+                                                <span className="zoe-response">
+
+                                                    {
+                                                        displayedResponse
+                                                    }
+
+
+                                                    {/* =================================
+                                                        GENERATION CURSOR
+                                                        ================================= */}
+
+                                                    <span
+                                                        className="zoe-response-cursor"
+                                                        aria-hidden="true"
+                                                    />
+
+                                                </span>
+
+
+                                                {/* =====================================
+                                                    RESPONSE COMMUNICATION INDICATOR
+                                                    ===================================== */}
+
+                                                <span
+                                                    className="zoe-response-open-indicator"
+                                                    aria-hidden="true"
+                                                >
+
+                                                    <span />
+                                                    <span />
+                                                    <span />
+
+                                                </span>
+
+                                            </button>
+
+                                        )
+                                    }
+
+
+                                    {/* =================================================
+                                        MICROPHONE
+                                        ================================================= */}
+
+                                    <button
+                                        className={
+                                            `zoe-mic ${muted
+                                                ? "muted"
+                                                : ""
+                                            }`
+                                        }
+
+                                        onClick={
+                                            toggleMute
+                                        }
+
+                                        aria-label={
+                                            muted
+                                                ? "Unmute ZOE"
+                                                : "Mute ZOE"
+                                        }
+
+                                        type="button"
+                                    >
+
+                                        <span className="zoe-mic-icon">
+
+                                            {
+                                                muted
+                                                    ? (
+                                                        <MicrophoneOffIcon />
+                                                    )
+                                                    : (
+                                                        <MicrophoneIcon />
+                                                    )
+                                            }
+
+                                        </span>
+
+                                    </button>
+
+                                </section>
+
+                            </main>
+
+                        </>
+                    )
+                }
+
+
+                {/* ====================================================
+                    ACTIVE PAGE
+                    ==================================================== */}
+
+                {
+                    activePage && (
+
+                        <main className="zoe-page-shell">
+
+                            <div className="zoe-page-content">
+
+                                {
+                                    renderActivePage()
+                                }
+
+                            </div>
+
+                        </main>
+
+                    )
+                }
+
+
+                {/* ====================================================
+                    PERSISTENT ZOE ORB
+                    ==================================================== */}
+
+                <div
+                    className={
+                        `zoe-persistent-orb ${activePage
+                            ? "page-mode"
+                            : "dashboard-mode"
+                        }`
+                    }
+                >
+
+                    <ZoeOrb
+                        label={
+                            orbState
+                        }
+
+                        state={
+                            orbState
+                        }
+                    />
+
+                </div>
+
             </div>
-
-        </div>
         </>
-
     );
 
 }
@@ -2274,10 +2133,6 @@ export default function ZoeDashboard() {
 function resolveBackgroundWork(
     data
 ) {
-
-    // ========================================================
-    // NEW FORMAT
-    // ========================================================
 
     const runtimeBgWork =
         data.runtime?.background_work;
@@ -2293,10 +2148,6 @@ function resolveBackgroundWork(
         topLevelBgWork ??
         null;
 
-
-    // ========================================================
-    // EXPLICIT BACKGROUND OBJECT
-    // ========================================================
 
     if (
         explicit &&
@@ -2376,10 +2227,6 @@ function resolveBackgroundWork(
     }
 
 
-    // ========================================================
-    // LEGACY EXPLICIT BACKGROUND OBJECT
-    // ========================================================
-
     if (
         explicit &&
         typeof explicit === "object"
@@ -2443,10 +2290,6 @@ function resolveBackgroundWork(
     }
 
 
-    // ========================================================
-    // FALLBACK FLAGS
-    // ========================================================
-
     const active =
         data.background_agent_active === true ||
         data.backgroundAgentActive === true ||
@@ -2480,10 +2323,6 @@ function resolveBackgroundWork(
 
     }
 
-
-    // ========================================================
-    // RUNTIME ACTIVE JOBS
-    // ========================================================
 
     const runtimeJobs =
         data.runtime?.active_jobs;
@@ -2560,10 +2399,6 @@ function resolveBackgroundWork(
 
     }
 
-
-    // ========================================================
-    // AGENT BATCHES
-    // ========================================================
 
     const runtimeBatches =
         data.runtime?.agent_batches;
@@ -2707,10 +2542,6 @@ function resolveBackgroundWork(
     }
 
 
-    // ========================================================
-    // FINAL FALLBACK
-    // ========================================================
-
     return {
 
         active:
@@ -2850,10 +2681,6 @@ function resolveProcessingMode(
     data
 ) {
 
-    // ========================================================
-    // FAILURE
-    // ========================================================
-
     if (
         data.error === true
     ) {
@@ -2862,10 +2689,6 @@ function resolveProcessingMode(
 
     }
 
-
-    // ========================================================
-    // EXPLICIT BACKEND STATE
-    // ========================================================
 
     const explicit =
         String(
@@ -2944,10 +2767,6 @@ function resolveProcessingMode(
     }
 
 
-    // ========================================================
-    // RUNTIME FLAGS
-    // ========================================================
-
     if (
         data.researching === true ||
         data.research === true
@@ -2989,10 +2808,6 @@ function resolveProcessingMode(
 
     }
 
-
-    // ========================================================
-    // DEFAULT
-    // ========================================================
 
     return "PROCESSING";
 
@@ -3038,10 +2853,6 @@ function resolveProcessingOperation(
     ];
 
 
-    // ========================================================
-    // USE EXPLICIT OPERATION
-    // ========================================================
-
     for (
         const candidate of candidates
     ) {
@@ -3059,10 +2870,6 @@ function resolveProcessingOperation(
 
     }
 
-
-    // ========================================================
-    // INFER FROM REAL RUNTIME FLAGS
-    // ========================================================
 
     if (
         data.researching === true ||

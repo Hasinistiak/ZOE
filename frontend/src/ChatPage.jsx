@@ -15,11 +15,11 @@ export default function ChatPage({
     onClose,
 }) {
 
-    
+
     const API_BASE = import.meta.env.DEV
-    ? ""
-    : "http://127.0.0.1:8000";
-    
+        ? ""
+        : "http://127.0.0.1:8000";
+
     // ========================================================
     // LOCAL CHAT STATE
     // ========================================================
@@ -517,7 +517,7 @@ export default function ChatPage({
             if (
                 !mountedRef.current ||
                 requestId !==
-                    requestIdRef.current
+                requestIdRef.current
             ) {
 
                 return;
@@ -552,7 +552,7 @@ export default function ChatPage({
             if (
                 !mountedRef.current ||
                 requestId !==
-                    requestIdRef.current
+                requestIdRef.current
             ) {
 
                 return;
@@ -582,7 +582,7 @@ export default function ChatPage({
             if (
                 mountedRef.current &&
                 requestId ===
-                    requestIdRef.current
+                requestIdRef.current
             ) {
 
                 setSending(false);
@@ -666,36 +666,19 @@ export default function ChatPage({
 
                 <div className="chat-brand">
 
-                    <div className="chat-brand-mark">
-                        Z
-                    </div>
+                    <span className="zoe-brand-mark">
+                        ◈
+                    </span>
 
 
                     <div>
 
-                        <div className="chat-brand-name">
-                            Z · O · E
-                        </div>
+                        <span className="zoe-brand-name">
+                            ZENITH ORCHESTRATION ENGINE
+                        </span>
 
 
-                        <div className="chat-brand-status">
 
-                            <span
-                                className={
-                                    online
-                                        ? "online"
-                                        : "offline"
-                                }
-                            />
-
-
-                            {
-                                online
-                                    ? "SYSTEM ONLINE"
-                                    : "SYSTEM OFFLINE"
-                            }
-
-                        </div>
 
                     </div>
 
@@ -704,13 +687,6 @@ export default function ChatPage({
 
                 <div className="chat-header-actions">
 
-                    <div className="chat-header-state">
-
-                        {
-                            zoeState.toUpperCase()
-                        }
-
-                    </div>
 
 
                     <button
@@ -746,11 +722,10 @@ export default function ChatPage({
                                         message.id
                                     }
                                     className={
-                                        `chat-message ${
-                                            message.role ===
+                                        `chat-message ${message.role ===
                                             "user"
-                                                ? "user"
-                                                : "assistant"
+                                            ? "user"
+                                            : "assistant"
                                         }`
                                     }
                                 >
@@ -759,7 +734,7 @@ export default function ChatPage({
 
                                         {
                                             message.role ===
-                                            "user"
+                                                "user"
                                                 ? "YOU"
                                                 : "ZOE"
                                         }

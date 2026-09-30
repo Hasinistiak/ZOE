@@ -4,6 +4,9 @@ import asyncio
 import logging
 import os
 import queue
+import shutil
+import subprocess
+import tempfile
 import threading
 from typing import Optional
 
@@ -27,6 +30,10 @@ from backend.zoe import (
     unsubscribe_runtime_events,
     unmute_zoe,
 )
+
+# IMPORTANT:
+# Change this import if your PocketTTS module has a different filename.
+from backend.speech.tts import generate_voice_file
 
 
 # ============================================================
@@ -70,34 +77,63 @@ except ValueError:
     TELEGRAM_ALLOWED_USER_ID = None
 
 
-# Telegram's maximum outgoing message size.
+# ============================================================
+# TELEGRAM VOICE
+# ============================================================
+
+TELEGRAM_VOICE_ENABLED = (
+    os.getenv(
+        "TELEGRAM_VOICE_ENABLED",
+        "true",
+    )
+    .strip()
+    .lower()
+    in {"1", "true", "yes", "on"}
+)
+
+TELEGRAM_VOICE_PROACTIVE = (
+    os.getenv(
+        "TELEGRAM_VOICE_PROACTIVE",
+        "true",
+    )
+    .strip()
+    .lower()
+    in {"1", "true", "yes", "on"}
+)
+
+TELEGRAM_VOICE_FFMPEG = (
+    os.getenv(
+        "TELEGRAM_VOICE_FFMPEG",
+        "ffmpeg",
+    )
+    .strip()
+    or "ffmpeg"
+)
+
+TELEGRAM_VOICE_TIMEOUT = max(
+    10.0,
+    float(
+        os.getenv(
+            "TELEGRAM_VOICE_TIMEOUT",
+            "120",
+        )
+    ),
+)
+
+
+# ============================================================
+# MESSAGE LIMITS
+# ============================================================
+
 TELEGRAM_MAX_MESSAGE_LENGTH = 4096
-
-
-# Maximum incoming message accepted by ZOE.
 TELEGRAM_MAX_INPUT_LENGTH = 12000
 
 
-# ------------------------------------------------------------
-# Maximum time Telegram will wait for the REAL final ZOE
-# response.
-#
-# This is especially important for agent requests.
-#
-# Example:
-#
-#   Telegram -> ZOE
-#             -> agent starts
-#             -> research/tool work
-#             -> synthesis
-#             -> final answer
-#             -> Telegram
-#
-# It does NOT return the initial agent acknowledgement.
-# ------------------------------------------------------------
+# ============================================================
+# RESPONSE TIMEOUT
+# ============================================================
 
 try:
-
     TELEGRAM_RESPONSE_TIMEOUT = max(
         5.0,
         float(
@@ -107,27 +143,13 @@ try:
             )
         ),
     )
-
 except (TypeError, ValueError):
-
     TELEGRAM_RESPONSE_TIMEOUT = 300.0
 
 
-# ------------------------------------------------------------
-# Runtime events which should become unsolicited Telegram
-# notifications.
-#
-# "response" is deliberately NOT included.
-#
-# Normal responses are already sent by _message_handler().
-#
-# The runtime uses:
-#
-#   output + type=notification
-#   output + type=reminder
-#
-# for proactive output.
-# ------------------------------------------------------------
+# ============================================================
+# PROACTIVE EVENTS
+# ============================================================
 
 PROACTIVE_OUTPUT_TYPES = {
     "notification",
@@ -157,9 +179,7 @@ _bot_application: Optional[
 ] = None
 
 _bot_started = threading.Event()
-
 _bot_stop_requested = threading.Event()
-
 _bot_state_lock = threading.RLock()
 
 
@@ -187,7 +207,6 @@ _proactive_queue: Optional[
 # ============================================================
 
 if not logging.getLogger().handlers:
-
     logging.basicConfig(
         level=logging.INFO,
         format=(
@@ -206,11 +225,6 @@ if not logging.getLogger().handlers:
 def _is_authorized(
     update: Update,
 ) -> bool:
-    """
-    Only the configured Telegram numeric user ID
-    may control ZOE.
-    """
-
     if TELEGRAM_ALLOWED_USER_ID is None:
         return False
 
@@ -228,16 +242,13 @@ def _is_authorized(
 def _log_unauthorized(
     update: Update,
 ) -> None:
-
     user = update.effective_user
 
     if user is None:
-
         LOGGER.warning(
             "Telegram unauthorized request "
             "from unknown user."
         )
-
         return
 
     LOGGER.warning(
@@ -280,7 +291,6 @@ def _split_message(
         )
 
         if split_at < 1000:
-
             split_at = text.rfind(
                 " ",
                 0,
@@ -288,7 +298,6 @@ def _split_message(
             )
 
         if split_at < 1000:
-
             split_at = max_length
 
         chunks.append(
@@ -323,10 +332,195 @@ async def _reply(
     )
 
     for chunk in chunks:
-
         await message.reply_text(
             chunk
         )
+
+
+# ============================================================
+# VOICE FILE CONVERSION
+# ============================================================
+
+def _wav_to_ogg(
+    wav_path: str,
+) -> str | None:
+    """
+    Convert WAV -> OGG/Opus for Telegram Voice Messages.
+    """
+
+    if not os.path.isfile(
+        wav_path
+    ):
+        return None
+
+    ffmpeg = shutil.which(
+        TELEGRAM_VOICE_FFMPEG
+    )
+
+    if ffmpeg is None:
+        LOGGER.error(
+            "FFmpeg was not found. "
+            "Telegram voice messages require FFmpeg."
+        )
+        return None
+
+    fd, ogg_path = tempfile.mkstemp(
+        prefix="zoe_voice_",
+        suffix=".ogg",
+    )
+
+    os.close(fd)
+
+    command = [
+        ffmpeg,
+        "-y",
+        "-loglevel",
+        "error",
+        "-i",
+        wav_path,
+        "-c:a",
+        "libopus",
+        "-b:a",
+        "48k",
+        "-vbr",
+        "on",
+        "-application",
+        "voip",
+        ogg_path,
+    ]
+
+    try:
+        result = subprocess.run(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=TELEGRAM_VOICE_TIMEOUT,
+            check=False,
+        )
+
+        if result.returncode != 0:
+
+            error = (
+                result.stderr
+                .decode(
+                    "utf-8",
+                    errors="replace",
+                )
+                .strip()
+            )
+
+            LOGGER.error(
+                "FFmpeg voice conversion failed: %s",
+                error or "unknown error",
+            )
+
+            try:
+                os.remove(
+                    ogg_path
+                )
+            except OSError:
+                pass
+
+            return None
+
+        return ogg_path
+
+    except subprocess.TimeoutExpired:
+
+        LOGGER.error(
+            "FFmpeg voice conversion timed out."
+        )
+
+        try:
+            os.remove(
+                ogg_path
+            )
+        except OSError:
+            pass
+
+        return None
+
+    except Exception:
+
+        LOGGER.exception(
+            "Unexpected FFmpeg error."
+        )
+
+        try:
+            os.remove(
+                ogg_path
+            )
+        except OSError:
+            pass
+
+        return None
+
+
+def _generate_telegram_voice(
+    text: str,
+) -> str | None:
+    """
+    Generate ZOE's PocketTTS voice and convert
+    it into Telegram-compatible OGG/Opus.
+    """
+
+    text = (
+        text
+        or ""
+    ).strip()
+
+    if not text:
+        return None
+
+    wav_path = None
+    ogg_path = None
+
+    try:
+
+        wav_path = generate_voice_file(
+            text
+        )
+
+        if not wav_path:
+            LOGGER.warning(
+                "PocketTTS produced no voice file."
+            )
+            return None
+
+        ogg_path = _wav_to_ogg(
+            wav_path
+        )
+
+        if not ogg_path:
+            return None
+
+        return ogg_path
+
+    except Exception:
+
+        LOGGER.exception(
+            "Failed to generate Telegram voice."
+        )
+
+        if ogg_path:
+            try:
+                os.remove(
+                    ogg_path
+                )
+            except OSError:
+                pass
+
+        return None
+
+    finally:
+
+        if wav_path:
+            try:
+                os.remove(
+                    wav_path
+                )
+            except OSError:
+                pass
 
 
 # ============================================================
@@ -349,7 +543,6 @@ async def _start_command(
         )
 
         if message is not None:
-
             await message.reply_text(
                 "Access denied."
             )
@@ -363,6 +556,9 @@ async def _start_command(
             "I'm connected to your ZOE runtime.\n\n"
             "Send me a normal message and "
             "I'll process it through ZOE.\n\n"
+            "You can also send me a voice message. "
+            "I'll transcribe it and reply with a "
+            "Telegram voice message.\n\n"
             "For longer agent tasks, I'll wait "
             "for the actual final result before "
             "replying.\n\n"
@@ -399,22 +595,25 @@ async def _help_command(
         update,
         (
             "ZOE Telegram Interface\n\n"
-            "Normal text:\n"
-            "  Send any message to ZOE.\n\n"
+            "Text:\n"
+            "Send any message to ZOE.\n\n"
+            "Voice:\n"
+            "Send a Telegram voice message. "
+            "ZOE will transcribe it and reply "
+            "with a voice message.\n\n"
             "Agent requests:\n"
-            "  ZOE waits for the final synthesized "
+            "ZOE waits for the final synthesized "
             "answer before replying.\n\n"
             "Proactive:\n"
-            "  ZOE can send reminders and "
-            "status notifications automatically.\n\n"
+            "ZOE can send reminders and status "
+            "notifications automatically.\n\n"
             "Commands:\n"
-            "  /start   Start the interface\n"
-            "  /help    Show this help\n"
-            "  /status  Show ZOE status\n"
-            "  /mute    Mute ZOE voice output\n"
-            "  /unmute  Enable ZOE voice output\n"
-            "  /stop    Stop current ZOE speech\n\n"
-            "Telegram responses do not trigger TTS."
+            "/start — Start the interface\n"
+            "/help — Show this help\n"
+            "/status — Show ZOE status\n"
+            "/mute — Mute ZOE voice output\n"
+            "/unmute — Enable ZOE voice output\n"
+            "/stop — Stop current ZOE speech"
         ),
     )
 
@@ -501,7 +700,9 @@ async def _status_command(
             f"{'YES' if muted else 'NO'}\n"
             f"Queued requests: {queued}\n"
             f"Telegram proactive: "
-            f"{'YES' if proactive_running else 'NO'}"
+            f"{'YES' if proactive_running else 'NO'}\n"
+            f"Telegram voice: "
+            f"{'YES' if TELEGRAM_VOICE_ENABLED else 'NO'}"
         )
 
         await _reply(
@@ -517,10 +718,7 @@ async def _status_command(
 
         await _reply(
             update,
-            (
-                "I couldn't retrieve the "
-                "current ZOE status."
-            ),
+            "I couldn't retrieve the current ZOE status.",
         )
 
 
@@ -634,15 +832,259 @@ async def _stop_command(
 
         await _reply(
             update,
-            (
-                "I couldn't stop the "
-                "current speech."
-            ),
+            "I couldn't stop the current speech.",
         )
 
 
 # ============================================================
-# NORMAL TELEGRAM MESSAGE
+# SEND TELEGRAM TEXT
+# ============================================================
+
+async def _send_message_async(
+    text: str,
+) -> bool:
+
+    with _bot_state_lock:
+        application = (
+            _bot_application
+        )
+
+    if application is None:
+
+        LOGGER.warning(
+            "Cannot send Telegram message: "
+            "bot is not running."
+        )
+
+        return False
+
+    if TELEGRAM_ALLOWED_USER_ID is None:
+        return False
+
+    chunks = _split_message(
+        text
+    )
+
+    if not chunks:
+        return False
+
+    try:
+
+        for chunk in chunks:
+
+            await application.bot.send_message(
+                chat_id=TELEGRAM_ALLOWED_USER_ID,
+                text=chunk,
+            )
+
+        return True
+
+    except Exception:
+
+        LOGGER.exception(
+            "Failed to send Telegram message."
+        )
+
+        return False
+
+
+def send_telegram_message(
+    text: str,
+    timeout: float = 15.0,
+) -> bool:
+
+    if not TELEGRAM_ENABLED:
+        return False
+
+    text = (
+        text
+        or ""
+    ).strip()
+
+    if not text:
+        return False
+
+    with _bot_state_lock:
+        loop = _bot_loop
+
+    if (
+        loop is None
+        or not loop.is_running()
+    ):
+
+        LOGGER.warning(
+            "Cannot send Telegram message: "
+            "event loop is not running."
+        )
+
+        return False
+
+    try:
+
+        future = (
+            asyncio.run_coroutine_threadsafe(
+                _send_message_async(text),
+                loop,
+            )
+        )
+
+        return bool(
+            future.result(
+                timeout=timeout
+            )
+        )
+
+    except Exception:
+
+        LOGGER.exception(
+            "Telegram outbound message failed."
+        )
+
+        return False
+
+
+# ============================================================
+# SEND TELEGRAM VOICE
+# ============================================================
+
+async def _send_voice_async(
+    text: str,
+) -> bool:
+
+    if not TELEGRAM_VOICE_ENABLED:
+        return False
+
+    with _bot_state_lock:
+        application = (
+            _bot_application
+        )
+
+    if application is None:
+
+        LOGGER.warning(
+            "Cannot send Telegram voice: "
+            "bot is not running."
+        )
+
+        return False
+
+    if TELEGRAM_ALLOWED_USER_ID is None:
+        return False
+
+    voice_path = None
+
+    try:
+
+        voice_path = await asyncio.to_thread(
+            _generate_telegram_voice,
+            text,
+        )
+
+        if not voice_path:
+            return False
+
+        with open(
+            voice_path,
+            "rb",
+        ) as voice_file:
+
+            await application.bot.send_voice(
+                chat_id=TELEGRAM_ALLOWED_USER_ID,
+                voice=voice_file,
+            )
+
+        LOGGER.info(
+            "ZOE voice -> Telegram delivered."
+        )
+
+        return True
+
+    except Exception:
+
+        LOGGER.exception(
+            "Failed to send Telegram voice."
+        )
+
+        return False
+
+    finally:
+
+        if voice_path:
+
+            try:
+                os.remove(
+                    voice_path
+                )
+            except OSError:
+                pass
+
+
+def send_telegram_voice(
+    text: str,
+    timeout: float = TELEGRAM_VOICE_TIMEOUT,
+) -> bool:
+    """
+    Thread-safe synchronous Telegram voice API.
+
+    Generates PocketTTS audio, converts it to
+    OGG/Opus and sends it as a native Telegram VM.
+    """
+
+    if not TELEGRAM_ENABLED:
+        return False
+
+    if not TELEGRAM_VOICE_ENABLED:
+        return False
+
+    text = (
+        text
+        or ""
+    ).strip()
+
+    if not text:
+        return False
+
+    with _bot_state_lock:
+        loop = _bot_loop
+
+    if (
+        loop is None
+        or not loop.is_running()
+    ):
+
+        LOGGER.warning(
+            "Cannot send Telegram voice: "
+            "event loop is not running."
+        )
+
+        return False
+
+    try:
+
+        future = (
+            asyncio.run_coroutine_threadsafe(
+                _send_voice_async(text),
+                loop,
+            )
+        )
+
+        return bool(
+            future.result(
+                timeout=timeout
+            )
+        )
+
+    except Exception:
+
+        LOGGER.exception(
+            "Telegram outbound voice failed."
+        )
+
+        return False
+
+
+# ============================================================
+# NORMAL TEXT MESSAGE
 # ============================================================
 
 async def _message_handler(
@@ -673,10 +1115,6 @@ async def _message_handler(
     if not text:
         return
 
-    # --------------------------------------------------------
-    # Protect ZOE from unnecessarily large Telegram payloads.
-    # --------------------------------------------------------
-
     if len(text) > TELEGRAM_MAX_INPUT_LENGTH:
 
         await _reply(
@@ -695,43 +1133,6 @@ async def _message_handler(
     )
 
     try:
-
-        # ----------------------------------------------------
-        # run_zoe is synchronous.
-        #
-        # Never block Telegram's asyncio event loop.
-        #
-        # Arguments:
-        #
-        #   text
-        #       User message.
-        #
-        #   False
-        #       Telegram must not trigger TTS.
-        #
-        #   True
-        #       Wait for the REAL final ZOE response.
-        #
-        #   TELEGRAM_RESPONSE_TIMEOUT
-        #       Maximum time to wait.
-        #
-        # This is the important fix for agent requests.
-        #
-        # Previously:
-        #
-        #   Telegram -> run_zoe()
-        #            -> agent acknowledgement
-        #            -> Telegram replies immediately
-        #
-        # Now:
-        #
-        #   Telegram -> run_zoe()
-        #            -> agent starts
-        #            -> agent completes
-        #            -> final synthesis
-        #            -> runtime resolves interaction
-        #            -> Telegram replies
-        # ----------------------------------------------------
 
         response = await asyncio.to_thread(
             run_zoe,
@@ -752,20 +1153,28 @@ async def _message_handler(
                 response_text[:200],
             )
 
+            # Always send text.
             await _reply(
                 update,
                 response_text,
             )
 
-            return
+            # Then send native VM.
+            if TELEGRAM_VOICE_ENABLED:
 
-        # ----------------------------------------------------
-        # No usable final response.
-        #
-        # This should be unusual because the runtime's
-        # completion mechanism should either return the final
-        # answer or raise an error.
-        # ----------------------------------------------------
+                voice_sent = await asyncio.to_thread(
+                    send_telegram_voice,
+                    response_text,
+                )
+
+                if not voice_sent:
+
+                    LOGGER.warning(
+                        "Telegram voice reply failed; "
+                        "text reply was already delivered."
+                    )
+
+            return
 
         LOGGER.warning(
             "ZOE returned no usable response "
@@ -796,6 +1205,184 @@ async def _message_handler(
 
 
 # ============================================================
+# TELEGRAM VOICE MESSAGE INPUT
+# ============================================================
+
+async def _voice_message_handler(
+    update: Update,
+    context: ContextTypes.DEFAULT_TYPE,
+) -> None:
+
+    if not _is_authorized(update):
+
+        _log_unauthorized(
+            update
+        )
+
+        return
+
+    message = (
+        update.effective_message
+    )
+
+    if message is None:
+        return
+
+    voice = message.voice
+
+    if voice is None:
+        return
+
+    LOGGER.info(
+        "Telegram voice -> ZOE | duration=%ss",
+        voice.duration,
+    )
+
+    temp_dir = tempfile.mkdtemp(
+        prefix="zoe_telegram_voice_"
+    )
+
+    input_path = os.path.join(
+        temp_dir,
+        "input.ogg",
+    )
+
+    try:
+
+        # ====================================================
+        # DOWNLOAD VOICE MESSAGE
+        # ====================================================
+
+        telegram_file = await context.bot.get_file(
+            voice.file_id
+        )
+
+        await telegram_file.download_to_drive(
+            input_path
+        )
+
+        # ====================================================
+        # STT
+        # ====================================================
+
+        from backend.speech.stt import (
+            transcribe_audio_file,
+        )
+
+        transcript = await asyncio.to_thread(
+            transcribe_audio_file,
+            input_path,
+        )
+
+        transcript = (
+            transcript
+            or ""
+        ).strip()
+
+        if not transcript:
+
+            await _reply(
+                update,
+                "I couldn't understand that voice message.",
+            )
+
+            return
+
+        # ====================================================
+        # IMPORTANT:
+        # DO NOT SEND THE TRANSCRIPT BACK TO TELEGRAM.
+        #
+        # The transcript is internal and goes directly
+        # into ZOE.
+        # ====================================================
+
+        LOGGER.info(
+            "Telegram VM transcribed successfully."
+        )
+
+        # ====================================================
+        # ZOE
+        # ====================================================
+
+        response = await asyncio.to_thread(
+            run_zoe,
+            transcript,
+            False,
+            True,
+            TELEGRAM_RESPONSE_TIMEOUT,
+        )
+
+        response_text = extract_response_text(
+            response
+        )
+
+        if not response_text:
+
+            await _reply(
+                update,
+                (
+                    "I'm still working on that. "
+                    "I'll send the result when it's ready."
+                ),
+            )
+
+            return
+
+        # ====================================================
+        # TEXT RESPONSE
+        # ====================================================
+
+        await _reply(
+            update,
+            response_text,
+        )
+
+        # ====================================================
+        # VOICE RESPONSE
+        # ====================================================
+
+        if TELEGRAM_VOICE_ENABLED:
+
+            voice_sent = await asyncio.to_thread(
+                send_telegram_voice,
+                response_text,
+            )
+
+            if not voice_sent:
+
+                LOGGER.warning(
+                    "Telegram VM voice response failed."
+                )
+
+    except Exception as exc:
+
+        LOGGER.exception(
+            "Telegram voice processing failed."
+        )
+
+        await _reply(
+            update,
+            (
+                "I couldn't process that voice message.\n\n"
+                f"{type(exc).__name__}: {exc}"
+            ),
+        )
+
+    finally:
+
+        try:
+
+            shutil.rmtree(
+                temp_dir,
+                ignore_errors=True,
+            )
+
+        except Exception:
+
+            pass
+
+
+# ============================================================
 # ERROR HANDLER
 # ============================================================
 
@@ -812,7 +1399,7 @@ async def _error_handler(
 
 
 # ============================================================
-# APPLICATION CONSTRUCTION
+# APPLICATION
 # ============================================================
 
 def _build_application() -> Application:
@@ -880,6 +1467,14 @@ def _build_application() -> Application:
         )
     )
 
+    # Voice messages MUST be registered separately.
+    application.add_handler(
+        MessageHandler(
+            filters.VOICE,
+            _voice_message_handler,
+        )
+    )
+
     application.add_handler(
         MessageHandler(
             filters.TEXT
@@ -930,14 +1525,6 @@ async def _telegram_main() -> None:
             drop_pending_updates=True,
         )
 
-        # ----------------------------------------------------
-        # Start the runtime event subscriber AFTER Telegram's
-        # bot loop is running.
-        #
-        # This allows proactive events to be forwarded safely
-        # through the same asyncio loop.
-        # ----------------------------------------------------
-
         start_proactive_notifications()
 
         _bot_started.set()
@@ -951,6 +1538,15 @@ async def _telegram_main() -> None:
             "bridge started."
         )
 
+        LOGGER.info(
+            "Telegram voice messages: %s",
+            (
+                "enabled"
+                if TELEGRAM_VOICE_ENABLED
+                else "disabled"
+            ),
+        )
+
         while not _bot_stop_requested.is_set():
 
             await asyncio.sleep(
@@ -962,10 +1558,6 @@ async def _telegram_main() -> None:
         LOGGER.info(
             "Stopping Telegram bot..."
         )
-
-        # ----------------------------------------------------
-        # Stop proactive event bridge first.
-        # ----------------------------------------------------
 
         stop_proactive_notifications(
             timeout=5.0
@@ -1023,9 +1615,7 @@ def _telegram_thread_main() -> None:
 
     global _bot_loop
 
-    loop = (
-        asyncio.new_event_loop()
-    )
+    loop = asyncio.new_event_loop()
 
     asyncio.set_event_loop(
         loop
@@ -1102,6 +1692,21 @@ def start_telegram_bot() -> bool:
 
         return False
 
+    if (
+        TELEGRAM_VOICE_ENABLED
+        and shutil.which(
+            TELEGRAM_VOICE_FFMPEG
+        ) is None
+    ):
+
+        LOGGER.error(
+            "Telegram voice is enabled but "
+            "FFmpeg was not found: %s",
+            TELEGRAM_VOICE_FFMPEG,
+        )
+
+        return False
+
     with _bot_state_lock:
 
         if (
@@ -1116,7 +1721,6 @@ def start_telegram_bot() -> bool:
             return True
 
         _bot_stop_requested.clear()
-
         _bot_started.clear()
 
         _bot_thread = threading.Thread(
@@ -1161,7 +1765,6 @@ def stop_telegram_bot(
         if not thread.is_alive():
 
             _bot_thread = None
-
             return
 
         _bot_stop_requested.set()
@@ -1216,166 +1819,12 @@ def is_telegram_running() -> bool:
 
 
 # ============================================================
-# TELEGRAM OUTBOUND
-# ============================================================
-
-async def _send_message_async(
-    text: str,
-) -> bool:
-
-    with _bot_state_lock:
-
-        application = (
-            _bot_application
-        )
-
-    if application is None:
-
-        LOGGER.warning(
-            "Cannot send Telegram message: "
-            "bot is not running."
-        )
-
-        return False
-
-    if TELEGRAM_ALLOWED_USER_ID is None:
-        return False
-
-    chunks = _split_message(
-        text
-    )
-
-    if not chunks:
-        return False
-
-    try:
-
-        for chunk in chunks:
-
-            await application.bot.send_message(
-                chat_id=(
-                    TELEGRAM_ALLOWED_USER_ID
-                ),
-                text=chunk,
-            )
-
-        return True
-
-    except Exception:
-
-        LOGGER.exception(
-            "Failed to send Telegram message."
-        )
-
-        return False
-
-
-def send_telegram_message(
-    text: str,
-    timeout: float = 15.0,
-) -> bool:
-    """
-    Thread-safe synchronous interface for ZOE.
-
-    Can safely be called from:
-      - Runtime threads
-      - Agent threads
-      - Status threads
-      - Flask
-      - CLI
-      - Other background workers
-    """
-
-    if not TELEGRAM_ENABLED:
-        return False
-
-    text = (
-        text
-        or ""
-    ).strip()
-
-    if not text:
-        return False
-
-    with _bot_state_lock:
-
-        loop = _bot_loop
-
-    if (
-        loop is None
-        or not loop.is_running()
-    ):
-
-        LOGGER.warning(
-            "Cannot send Telegram message: "
-            "event loop is not running."
-        )
-
-        return False
-
-    try:
-
-        future = (
-            asyncio.run_coroutine_threadsafe(
-                _send_message_async(text),
-                loop,
-            )
-        )
-
-        return bool(
-            future.result(
-                timeout=timeout
-            )
-        )
-
-    except Exception:
-
-        LOGGER.exception(
-            "Telegram outbound message failed."
-        )
-
-        return False
-
-
-# ============================================================
-# PROACTIVE ZOE -> TELEGRAM
+# PROACTIVE TELEGRAM
 # ============================================================
 
 def _extract_proactive_text(
     event: object,
 ) -> Optional[str]:
-    """
-    Extract only genuine proactive output events.
-
-    Runtime output looks like:
-
-        {
-            "type": "output",
-            "data": {
-                "type": "notification",
-                "text": "...",
-                ...
-            }
-        }
-
-    or:
-
-        {
-            "type": "output",
-            "data": {
-                "type": "reminder",
-                "text": "...",
-                ...
-            }
-        }
-
-    Normal responses use:
-
-        data["type"] == "response"
-
-    and are intentionally ignored here because the
-    Telegram message handler sends those itself.
-    """
 
     if not isinstance(
         event,
@@ -1440,7 +1889,6 @@ def _proactive_event_worker() -> None:
             )
 
         if event_queue is None:
-
             break
 
         try:
@@ -1486,23 +1934,44 @@ def _proactive_event_worker() -> None:
                 text[:200],
             )
 
-            success = send_telegram_message(
+            # Text notification.
+            text_success = send_telegram_message(
                 text
             )
 
-            if success:
+            if text_success:
 
                 LOGGER.info(
-                    "ZOE proactive notification "
+                    "ZOE proactive text "
                     "delivered to Telegram."
                 )
 
-            else:
+            # Voice notification.
+            if (
+                text_success
+                and TELEGRAM_VOICE_ENABLED
+                and TELEGRAM_VOICE_PROACTIVE
+            ):
 
-                LOGGER.warning(
-                    "ZOE proactive notification "
-                    "could not be delivered."
+                voice_success = (
+                    send_telegram_voice(
+                        text
+                    )
                 )
+
+                if voice_success:
+
+                    LOGGER.info(
+                        "ZOE proactive voice "
+                        "delivered to Telegram."
+                    )
+
+                else:
+
+                    LOGGER.warning(
+                        "ZOE proactive voice "
+                        "could not be delivered."
+                    )
 
         except Exception:
 
@@ -1547,10 +2016,6 @@ def start_proactive_notifications() -> bool:
         ):
 
             return True
-
-        # ----------------------------------------------------
-        # Subscribe to the central ZOE runtime event bus.
-        # ----------------------------------------------------
 
         try:
 
@@ -1615,10 +2080,6 @@ def stop_proactive_notifications(
 
         _proactive_stop_requested.set()
 
-    # --------------------------------------------------------
-    # Remove subscription first.
-    # --------------------------------------------------------
-
     if subscriber_id:
 
         try:
@@ -1675,23 +2136,23 @@ def is_proactive_notifications_running() -> bool:
 
 
 # ============================================================
-# SIMPLE NOTIFICATION ALIAS
+# PUBLIC NOTIFICATION API
 # ============================================================
 
 def notify_telegram(
     text: str,
 ) -> bool:
-    """
-    Public notification API for other ZOE modules.
-
-    Example:
-
-        notify_telegram(
-            "Sir, your reminder is due."
-        )
-    """
 
     return send_telegram_message(
+        text
+    )
+
+
+def notify_telegram_voice(
+    text: str,
+) -> bool:
+
+    return send_telegram_voice(
         text
     )
 
@@ -1703,7 +2164,11 @@ def notify_telegram(
 if __name__ == "__main__":
 
     print("=" * 60)
-    print("ZOE TELEGRAM INTERFACE")
+
+    print(
+        "ZOE TELEGRAM INTERFACE"
+    )
+
     print("=" * 60)
 
     if not TELEGRAM_ENABLED:
@@ -1736,6 +2201,20 @@ if __name__ == "__main__":
 
         raise SystemExit(1)
 
+    if (
+        TELEGRAM_VOICE_ENABLED
+        and shutil.which(
+            TELEGRAM_VOICE_FFMPEG
+        ) is None
+    ):
+
+        print(
+            "FFmpeg is required for Telegram "
+            "voice messages."
+        )
+
+        raise SystemExit(1)
+
     if not start_telegram_bot():
 
         print(
@@ -1745,6 +2224,7 @@ if __name__ == "__main__":
         raise SystemExit(1)
 
     print()
+
     print(
         "Telegram bot is running."
     )
@@ -1755,6 +2235,11 @@ if __name__ == "__main__":
 
     print(
         "Final-response waiting: enabled."
+    )
+
+    print(
+        "Telegram voice messages: "
+        f"{'enabled' if TELEGRAM_VOICE_ENABLED else 'disabled'}"
     )
 
     print(
@@ -1777,9 +2262,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
 
         print()
-        print(
-            "Stopping..."
-        )
+        print("Stopping...")
 
     finally:
 

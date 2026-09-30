@@ -9,7 +9,7 @@ import numpy as np
 from scipy.signal import butter, sosfilt
 from openwakeword.model import Model
 
-from backend.listening import get_bridge
+from backend.speech.listening import get_bridge
 
 
 # ============================================================

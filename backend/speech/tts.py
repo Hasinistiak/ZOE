@@ -15,7 +15,8 @@ import time
 import numpy as np
 import sounddevice as sd
 from pocket_tts import TTSModel
-
+import tempfile
+import wave
 
 # ============================================================================
 # CONFIG
@@ -79,14 +80,36 @@ AUDIO_BLOCKSIZE = int(
 LOGGER = logging.getLogger("zoe.tts")
 
 if not LOGGER.handlers:
-    logging.basicConfig(
-        level=os.getenv(
-            "ZOE_TTS_LOG_LEVEL",
-            "INFO",
-        ).upper(),
-        format="[ZOE TTS] %(levelname)s: %(message)s",
+    _handler = logging.StreamHandler()
+    _handler.setFormatter(
+        logging.Formatter(
+            "[ZOE TTS] %(levelname)s: %(message)s"
+        )
     )
+    LOGGER.addHandler(_handler)
 
+LOGGER.setLevel(
+    os.getenv(
+        "ZOE_TTS_LOG_LEVEL",
+        "INFO",
+    ).upper()
+)
+
+# IMPORTANT:
+# Do not send TTS messages into the application's root logger.
+# This prevents the [ZOE TTS] prefix from appearing on Brain,
+# Telegram, HTTPX, Flask/Werkzeug, etc.
+LOGGER.propagate = False
+
+# ============================================================================
+# QUIET THIRD-PARTY LOGGERS
+# ============================================================================
+
+# These libraries are intentionally quiet during normal operation.
+# Warnings and errors still appear.
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+logging.getLogger("httpcore.connection").setLevel(logging.WARNING)
 
 # ============================================================================
 # DATA TYPES
@@ -2509,6 +2532,109 @@ def _main() -> None:
 atexit.register(
     shutdown
 )
+
+def generate_voice_file(
+    text: str,
+    output_path: str | None = None,
+) -> str | None:
+    """
+    Generate ZOE speech into a WAV file without playing it.
+
+    Returns the WAV path on success.
+    Returns None when generation fails.
+    """
+
+    text = str(text or "").strip()
+
+    if not text:
+        return None
+
+    chunks = _split_sentences(text)
+
+    if not chunks:
+        return None
+
+    preload()
+
+    model = _tts
+    voice_state = _voice_state
+
+    if model is None or voice_state is None:
+        LOGGER.error("Pocket TTS is not initialized.")
+        return None
+
+    owns_file = output_path is None
+
+    if output_path is None:
+        fd, output_path = tempfile.mkstemp(
+            prefix="zoe_voice_",
+            suffix=".wav",
+        )
+        os.close(fd)
+
+    try:
+        audio_parts: list[np.ndarray] = []
+
+        for chunk in chunks:
+            audio_stream = model.generate_audio_stream(
+                model_state=voice_state,
+                text_to_generate=chunk,
+                copy_state=True,
+            )
+
+            for audio in audio_stream:
+                pcm = _audio_to_pcm(audio)
+
+                if pcm.size:
+                    audio_parts.append(pcm)
+
+        if not audio_parts:
+            LOGGER.warning(
+                "Pocket TTS generated no audio."
+            )
+
+            if owns_file:
+                try:
+                    os.remove(output_path)
+                except OSError:
+                    pass
+
+            return None
+
+        pcm = np.concatenate(
+            audio_parts
+        )
+
+        with wave.open(
+            output_path,
+            "wb",
+        ) as wav:
+            wav.setnchannels(1)
+            wav.setsampwidth(2)
+            wav.setframerate(SAMPLE_RATE)
+            wav.writeframes(
+                pcm.tobytes()
+            )
+
+        LOGGER.debug(
+            "Generated voice file: %s",
+            output_path,
+        )
+
+        return output_path
+
+    except Exception:
+        LOGGER.exception(
+            "Failed to generate voice file."
+        )
+
+        if owns_file:
+            try:
+                os.remove(output_path)
+            except OSError:
+                pass
+
+        return None
 
 
 if __name__ == "__main__":

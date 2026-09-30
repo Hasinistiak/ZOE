@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -14,6 +13,7 @@ from backend.agents.reminder_agent import run_reminder_agent
 from backend.agents.spotify_agent import run_spotify_agent
 from backend.agents.weather_agent import run_weather_agent
 from backend.agents.news_agent import run_world_news_agent
+from backend.agents.web_search_agent import run_web_search_agent
 from backend.agents.project_agent import run_project_creator_agent
 
 
@@ -156,6 +156,20 @@ AGENTS: dict[str, AgentSpec] = {
     ),
 
     # ========================================================
+    # WEB SEARCH
+    # ========================================================
+
+    "web_search": AgentSpec(
+        name="web_search",
+        description=(
+            "General web search and research. Use this when the "
+            "user asks a question that requires current, recent, "
+            "or externally verifiable information. Search the web "
+        ),
+        function=run_web_search_agent,
+    ),
+
+    # ========================================================
     # FOOTBALL NEWS
     # ========================================================
 
@@ -290,4 +304,3 @@ def execute_agent(
     return function(
         **kwargs
     )
-

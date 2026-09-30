@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import atexit
 import json
+import logging
 import queue
 import threading
 from typing import Generator
@@ -88,11 +89,44 @@ BACKEND_PORT = 8000
 
 
 # ============================================================
+# CLEAN WERKZEUG LOGGING
+# ============================================================
+
+class WerkzeugFilter(logging.Filter):
+    """
+    Hide noisy successful polling requests while keeping:
+
+    - 4xx errors
+    - 5xx errors
+    - non-state requests
+    - useful Werkzeug messages
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        message = record.getMessage()
+
+        # Hide successful /api/state polling
+        if (
+            '"GET /api/state ' in message
+            and '" 200 ' in message
+        ):
+            return False
+
+        return True
+
+
+werkzeug_logger = logging.getLogger("werkzeug")
+werkzeug_logger.addFilter(WerkzeugFilter())
+
+# Keep Werkzeug errors/warnings visible.
+werkzeug_logger.setLevel(logging.INFO)
+
+
+# ============================================================
 # LOCKS
 # ============================================================
 
 _response_lock = threading.Lock()
-
 _shutdown_lock = threading.Lock()
 
 
@@ -112,16 +146,112 @@ _startup_complete = False
 
 
 # ============================================================
+# RESPONSE HELPERS
+# ============================================================
+
+def _get_safe_last_response() -> str:
+    """
+    Safely retrieve the latest ZOE response.
+    """
+
+    with _response_lock:
+
+        try:
+
+            response = get_last_response() or ""
+
+        except Exception as exc:
+
+            print(
+                "[FLASK] Failed to read last response:",
+                exc,
+            )
+
+            return ""
+
+    return str(response)
+
+
+def _set_safe_last_response(response: str) -> None:
+    """
+    Safely update the latest ZOE response.
+    """
+
+    with _response_lock:
+
+        try:
+
+            set_last_response(response)
+
+        except Exception as exc:
+
+            print(
+                "[FLASK] Failed to update last response:",
+                exc,
+            )
+
+
+# ============================================================
+# STARTUP MESSAGE
+# ============================================================
+
+def _send_startup_message() -> None:
+
+
+    startup_message = (
+        "You're coming online. "
+        "give Hasin a concise startup greeting."
+    )
+
+    try:
+
+        print("[FLASK] Sending startup message to ZOE...")
+
+        result = run_zoe(
+            startup_message,
+            speak_output=True,
+        )
+
+        response_text = extract_response_text(
+            result
+        )
+
+        if response_text is None:
+            response_text = ""
+
+        if not isinstance(
+            response_text,
+            str,
+        ):
+            response_text = str(
+                response_text
+            )
+
+        response_text = response_text.strip()
+
+        _set_safe_last_response(
+            response_text
+        )
+
+        print(
+            "[FLASK] ZOE startup message processed."
+        )
+
+    except Exception as exc:
+
+        print(
+            "[FLASK] ZOE startup message failed:",
+            exc,
+        )
+
+
+# ============================================================
 # STARTUP
 # ============================================================
 
 def start_services() -> None:
     """
     Start all ZOE services exactly once.
-
-    This keeps startup explicit instead of executing
-    service initialization merely because this module
-    was imported.
     """
 
     global _startup_complete
@@ -131,9 +261,7 @@ def start_services() -> None:
         if _startup_complete:
             return
 
-        print(
-            "[FLASK] Starting ZOE services..."
-        )
+        print("[FLASK] Starting ZOE services...")
 
         # ----------------------------------------------------
         # STT
@@ -164,9 +292,7 @@ def start_services() -> None:
 
         try:
 
-            telegram_started = (
-                start_telegram_bot()
-            )
+            telegram_started = start_telegram_bot()
 
             if telegram_started:
 
@@ -188,60 +314,21 @@ def start_services() -> None:
                 f"to start: {exc}"
             )
 
+        # ----------------------------------------------------
+        # MARK STARTUP COMPLETE
+        # ----------------------------------------------------
+
         _startup_complete = True
 
+        # ----------------------------------------------------
+        # ZOE STARTUP MESSAGE
+        # ----------------------------------------------------
 
-# ============================================================
-# RESPONSE HELPERS
-# ============================================================
-
-def _get_safe_last_response() -> str:
-    """
-    Safely retrieve the latest ZOE response.
-    """
-
-    with _response_lock:
-
-        try:
-
-            response = (
-                get_last_response()
-                or ""
-            )
-
-        except Exception as exc:
-
-            print(
-                "[FLASK] Failed to read last response:",
-                exc,
-            )
-
-            return ""
-
-    return str(response)
-
-
-def _set_safe_last_response(
-    response: str,
-) -> None:
-    """
-    Safely update the latest ZOE response.
-    """
-
-    with _response_lock:
-
-        try:
-
-            set_last_response(
-                response
-            )
-
-        except Exception as exc:
-
-            print(
-                "[FLASK] Failed to update last response:",
-                exc,
-            )
+        threading.Thread(
+            target=_send_startup_message,
+            name="ZOE-Startup-Message",
+            daemon=True,
+        ).start()
 
 
 # ============================================================
@@ -255,14 +342,9 @@ def _safe_runtime_snapshot() -> dict:
 
     try:
 
-        snapshot = (
-            get_runtime_snapshot()
-        )
+        snapshot = get_runtime_snapshot()
 
-        if not isinstance(
-            snapshot,
-            dict,
-        ):
+        if not isinstance(snapshot, dict):
 
             return {
                 "online": True,
@@ -293,14 +375,9 @@ def _safe_status_snapshot() -> dict:
 
     try:
 
-        status = (
-            get_status_snapshot()
-        )
+        status = get_status_snapshot()
 
-        if isinstance(
-            status,
-            dict,
-        ):
+        if isinstance(status, dict):
 
             return status
 
@@ -335,15 +412,11 @@ def _build_fallback_state_snapshot(
 
         current_state = "offline"
 
-
     try:
 
         stt = get_stt_data()
 
-        if not isinstance(
-            stt,
-            dict,
-        ):
+        if not isinstance(stt, dict):
 
             stt = {}
 
@@ -356,7 +429,6 @@ def _build_fallback_state_snapshot(
 
         stt = {}
 
-
     try:
 
         muted = bool(
@@ -366,7 +438,6 @@ def _build_fallback_state_snapshot(
     except Exception:
 
         muted = False
-
 
     try:
 
@@ -378,7 +449,6 @@ def _build_fallback_state_snapshot(
 
         speaking = False
 
-
     try:
 
         processing = bool(
@@ -389,19 +459,14 @@ def _build_fallback_state_snapshot(
 
         processing = False
 
-
     activity = runtime_snapshot.get(
         "activity",
         [],
     )
 
-    if not isinstance(
-        activity,
-        list,
-    ):
+    if not isinstance(activity, list):
 
         activity = []
-
 
     return {
 
@@ -437,59 +502,38 @@ def _build_fallback_state_snapshot(
         "stt": {
 
             "text": (
-                stt.get(
-                    "text",
-                    "",
-                )
+                stt.get("text", "")
                 or ""
             ),
 
             "final_text": (
-                stt.get(
-                    "final_text",
-                    "",
-                )
+                stt.get("final_text", "")
                 or ""
             ),
 
             "last_final_text": (
-                stt.get(
-                    "last_final_text",
-                    "",
-                )
+                stt.get("last_final_text", "")
                 or ""
             ),
 
             "final": bool(
-                stt.get(
-                    "final",
-                    False,
-                )
+                stt.get("final", False)
             ),
 
             "speaking": bool(
-                stt.get(
-                    "speaking",
-                    False,
-                )
+                stt.get("speaking", False)
             ),
 
             "user_speaking": bool(
-                stt.get(
-                    "user_speaking",
-                    False,
-                )
+                stt.get("user_speaking", False)
             ),
-
         },
 
         # ------------------------------------------------
         # RESPONSE
         # ------------------------------------------------
 
-        "response": (
-            _get_safe_last_response()
-        ),
+        "response": _get_safe_last_response(),
 
         # ------------------------------------------------
         # RUNTIME
@@ -503,9 +547,7 @@ def _build_fallback_state_snapshot(
         # STATUS
         # ------------------------------------------------
 
-        "status": (
-            _safe_status_snapshot()
-        ),
+        "status": _safe_status_snapshot(),
 
         # ------------------------------------------------
         # TELEGRAM
@@ -514,7 +556,6 @@ def _build_fallback_state_snapshot(
         "telegram": {
             "running": is_telegram_running(),
         },
-
     }
 
 
@@ -530,10 +571,7 @@ def _build_state_snapshot() -> dict:
     STT/runtime/status/Telegram information if necessary.
     """
 
-    runtime_snapshot = (
-        _safe_runtime_snapshot()
-    )
-
+    runtime_snapshot = _safe_runtime_snapshot()
 
     # ========================================================
     # CANONICAL ZOE SNAPSHOT
@@ -541,9 +579,7 @@ def _build_state_snapshot() -> dict:
 
     try:
 
-        canonical = (
-            get_zoe_snapshot()
-        )
+        canonical = get_zoe_snapshot()
 
     except Exception as exc:
 
@@ -554,19 +590,12 @@ def _build_state_snapshot() -> dict:
 
         canonical = None
 
-
-    if isinstance(
-        canonical,
-        dict,
-    ):
+    if isinstance(canonical, dict):
 
         # Work on a copy so we never mutate
         # the backend's returned object.
 
-        snapshot = dict(
-            canonical
-        )
-
+        snapshot = dict(canonical)
 
         # ----------------------------------------------------
         # Runtime
@@ -577,21 +606,13 @@ def _build_state_snapshot() -> dict:
             runtime_snapshot,
         )
 
-        runtime = snapshot.get(
-            "runtime"
-        )
+        runtime = snapshot.get("runtime")
 
-        if not isinstance(
-            runtime,
-            dict,
-        ):
+        if not isinstance(runtime, dict):
 
-            snapshot["runtime"] = (
-                runtime_snapshot
-            )
+            snapshot["runtime"] = runtime_snapshot
 
             runtime = runtime_snapshot
-
 
         # ----------------------------------------------------
         # Activity
@@ -602,15 +623,11 @@ def _build_state_snapshot() -> dict:
             [],
         )
 
-        if not isinstance(
-            activity,
-            list,
-        ):
+        if not isinstance(activity, list):
 
             activity = []
 
         snapshot["activity"] = activity
-
 
         # ----------------------------------------------------
         # STT
@@ -631,7 +648,6 @@ def _build_state_snapshot() -> dict:
 
             snapshot["stt"] = stt
 
-
         # ----------------------------------------------------
         # Response
         # ----------------------------------------------------
@@ -641,7 +657,6 @@ def _build_state_snapshot() -> dict:
             snapshot["response"] = (
                 _get_safe_last_response()
             )
-
 
         # ----------------------------------------------------
         # Status
@@ -653,7 +668,6 @@ def _build_state_snapshot() -> dict:
                 _safe_status_snapshot()
             )
 
-
         # ----------------------------------------------------
         # Telegram
         # ----------------------------------------------------
@@ -661,7 +675,6 @@ def _build_state_snapshot() -> dict:
         snapshot["telegram"] = {
             "running": is_telegram_running(),
         }
-
 
         # ----------------------------------------------------
         # Online
@@ -672,9 +685,7 @@ def _build_state_snapshot() -> dict:
             True,
         )
 
-
         return snapshot
-
 
     # ========================================================
     # BACKWARDS-COMPATIBLE FALLBACK
@@ -709,7 +720,6 @@ def health():
             "state",
             "offline",
         ),
-
     })
 
 
@@ -736,7 +746,6 @@ def status_snapshot():
 
         }), 500
 
-
     return jsonify({
 
         **status,
@@ -744,7 +753,6 @@ def status_snapshot():
         "telegram": {
             "running": is_telegram_running(),
         },
-
     })
 
 
@@ -762,13 +770,9 @@ def state():
         False,
     ):
 
-        return jsonify(
-            snapshot
-        ), 500
+        return jsonify(snapshot), 500
 
-    return jsonify(
-        snapshot
-    )
+    return jsonify(snapshot)
 
 
 # ============================================================
@@ -780,15 +784,11 @@ def activity():
 
     try:
 
-        runtime_snapshot = (
-            _safe_runtime_snapshot()
-        )
+        runtime_snapshot = _safe_runtime_snapshot()
 
-        activities = (
-            runtime_snapshot.get(
-                "activity",
-                [],
-            )
+        activities = runtime_snapshot.get(
+            "activity",
+            [],
         )
 
         return jsonify({
@@ -796,7 +796,6 @@ def activity():
             "success": True,
 
             "activity": activities,
-
         })
 
     except Exception as exc:
@@ -813,7 +812,6 @@ def activity():
             "activity": [],
 
             "error": str(exc),
-
         }), 500
 
 
@@ -826,22 +824,14 @@ def _sse_encode(
 ) -> str:
     """
     Convert a runtime event into an SSE message.
-
-    Runtime event type remains inside:
-
-        data.type
     """
 
-    if not isinstance(
-        event,
-        dict,
-    ):
+    if not isinstance(event, dict):
 
         event = {
             "type": "unknown",
             "data": event,
         }
-
 
     event_id = str(
         event.get(
@@ -850,7 +840,6 @@ def _sse_encode(
         )
         or ""
     )
-
 
     try:
 
@@ -875,12 +864,9 @@ def _sse_encode(
             "type": "serialization_error",
 
             "error": str(exc),
-
         })
 
-
     lines = []
-
 
     if event_id:
 
@@ -888,20 +874,15 @@ def _sse_encode(
             f"id: {event_id}"
         )
 
-
     for line in payload.splitlines():
 
         lines.append(
             f"data: {line}"
         )
 
-
     lines.append("")
 
-
-    return "\n".join(
-        lines
-    ) + "\n"
+    return "\n".join(lines) + "\n"
 
 
 # ============================================================
@@ -914,10 +895,7 @@ def _sse_snapshot_event() -> str:
     after an SSE connection is established.
     """
 
-    snapshot = (
-        _build_state_snapshot()
-    )
-
+    snapshot = _build_state_snapshot()
 
     event = {
 
@@ -928,13 +906,9 @@ def _sse_snapshot_event() -> str:
         "timestamp": None,
 
         "data": snapshot,
-
     }
 
-
-    return _sse_encode(
-        event
-    )
+    return _sse_encode(event)
 
 
 # ============================================================
@@ -962,9 +936,7 @@ def runtime_events():
             "success": False,
 
             "error": str(exc),
-
         }), 500
-
 
     @stream_with_context
     def generate() -> Generator[
@@ -977,12 +949,9 @@ def runtime_events():
 
             # ------------------------------------------------
             # Initial hydration
-            #
-            # Subscription happens BEFORE snapshot.
             # ------------------------------------------------
 
             yield _sse_snapshot_event()
-
 
             # ------------------------------------------------
             # Live event loop
@@ -1002,7 +971,6 @@ def runtime_events():
 
                     continue
 
-
                 # ------------------------------------------------
                 # Runtime shutdown
                 # ------------------------------------------------
@@ -1011,20 +979,15 @@ def runtime_events():
 
                     break
 
-
                 # ------------------------------------------------
                 # Forward runtime event
                 # ------------------------------------------------
 
-                yield _sse_encode(
-                    event
-                )
-
+                yield _sse_encode(event)
 
         except GeneratorExit:
 
             pass
-
 
         except (
             BrokenPipeError,
@@ -1033,14 +996,12 @@ def runtime_events():
 
             pass
 
-
         except Exception as exc:
 
             print(
                 "[FLASK SSE] Stream error:",
                 exc,
             )
-
 
         finally:
 
@@ -1057,12 +1018,10 @@ def runtime_events():
                     exc,
                 )
 
-
     response = Response(
         generate(),
         mimetype="text/event-stream",
     )
-
 
     # ========================================================
     # SSE HEADERS
@@ -1088,7 +1047,6 @@ def runtime_events():
         "Connection"
     ] = "keep-alive"
 
-
     return response
 
 
@@ -1108,7 +1066,6 @@ def response():
             "response": (
                 _get_safe_last_response()
             ),
-
         })
 
     except Exception as exc:
@@ -1125,7 +1082,6 @@ def response():
             "response": "",
 
             "error": str(exc),
-
         }), 500
 
 
@@ -1145,7 +1101,6 @@ def microphone_state():
             "muted": bool(
                 is_zoe_muted()
             ),
-
         })
 
     except Exception as exc:
@@ -1162,7 +1117,6 @@ def microphone_state():
             "muted": False,
 
             "error": str(exc),
-
         }), 500
 
 
@@ -1182,7 +1136,6 @@ def microphone_mute():
             "success": True,
 
             "muted": True,
-
         })
 
     except Exception as exc:
@@ -1202,7 +1155,6 @@ def microphone_mute():
 
             muted = False
 
-
         return jsonify({
 
             "success": False,
@@ -1210,7 +1162,6 @@ def microphone_mute():
             "muted": muted,
 
             "error": str(exc),
-
         }), 500
 
 
@@ -1230,7 +1181,6 @@ def microphone_unmute():
             "success": True,
 
             "muted": False,
-
         })
 
     except Exception as exc:
@@ -1250,7 +1200,6 @@ def microphone_unmute():
 
             muted = False
 
-
         return jsonify({
 
             "success": False,
@@ -1258,7 +1207,6 @@ def microphone_unmute():
             "muted": muted,
 
             "error": str(exc),
-
         }), 500
 
 
@@ -1273,65 +1221,41 @@ def stt():
 
         data = get_stt_data()
 
-        if not isinstance(
-            data,
-            dict,
-        ):
+        if not isinstance(data, dict):
 
             data = {}
-
 
         return jsonify({
 
             "success": True,
 
             "text": (
-                data.get(
-                    "text",
-                    "",
-                )
+                data.get("text", "")
                 or ""
             ),
 
             "final_text": (
-                data.get(
-                    "final_text",
-                    "",
-                )
+                data.get("final_text", "")
                 or ""
             ),
 
             "last_final_text": (
-                data.get(
-                    "last_final_text",
-                    "",
-                )
+                data.get("last_final_text", "")
                 or ""
             ),
 
             "final": bool(
-                data.get(
-                    "final",
-                    False,
-                )
+                data.get("final", False)
             ),
 
             "speaking": bool(
-                data.get(
-                    "speaking",
-                    False,
-                )
+                data.get("speaking", False)
             ),
 
             "user_speaking": bool(
-                data.get(
-                    "user_speaking",
-                    False,
-                )
+                data.get("user_speaking", False)
             ),
-
         })
-
 
     except Exception as exc:
 
@@ -1357,8 +1281,8 @@ def stt():
             "user_speaking": False,
 
             "error": str(exc),
-
         }), 500
+
 
 # ============================================================
 # CHAT
@@ -1374,12 +1298,10 @@ def chat():
         or {}
     )
 
-
     message = data.get(
         "message",
         "",
     )
-
 
     # ========================================================
     # VALIDATION
@@ -1394,15 +1316,11 @@ def chat():
 
             "success": False,
 
-            "error": (
-                "message must be a string"
-            ),
+            "error": "message must be a string",
 
         }), 400
 
-
     message = message.strip()
-
 
     if not message:
 
@@ -1410,12 +1328,9 @@ def chat():
 
             "success": False,
 
-            "error": (
-                "Message cannot be empty"
-            ),
+            "error": "Message cannot be empty",
 
         }), 400
-
 
     # ========================================================
     # RUN ZOE
@@ -1423,28 +1338,20 @@ def chat():
 
     try:
 
-        _set_safe_last_response(
-            ""
-        )
-
+        _set_safe_last_response("")
 
         result = run_zoe(
             message,
             speak_output=True,
         )
 
-
-        response_text = (
-            extract_response_text(
-                result
-            )
+        response_text = extract_response_text(
+            result
         )
-
 
         if response_text is None:
 
             response_text = ""
-
 
         if not isinstance(
             response_text,
@@ -1455,16 +1362,11 @@ def chat():
                 response_text
             )
 
-
-        response_text = (
-            response_text.strip()
-        )
-
+        response_text = response_text.strip()
 
         _set_safe_last_response(
             response_text
         )
-
 
         return jsonify({
 
@@ -1473,9 +1375,7 @@ def chat():
             "response": response_text,
 
             "result": response_text,
-
         })
-
 
     except Exception as exc:
 
@@ -1484,7 +1384,6 @@ def chat():
             exc,
         )
 
-
         return jsonify({
 
             "success": False,
@@ -1492,7 +1391,6 @@ def chat():
             "response": "",
 
             "error": str(exc),
-
         }), 500
 
 
@@ -1510,9 +1408,7 @@ def stop_speech():
         return jsonify({
 
             "success": True,
-
         })
-
 
     except Exception as exc:
 
@@ -1526,7 +1422,6 @@ def stop_speech():
             "success": False,
 
             "error": str(exc),
-
         }), 500
 
 
@@ -1541,15 +1436,14 @@ def shutdown():
     with _shutdown_lock:
 
         if _shutdown_called:
+
             return
 
         _shutdown_called = True
 
-
     print(
         "\n[FLASK] Shutting down ZOE..."
     )
-
 
     # ========================================================
     # TELEGRAM FIRST
@@ -1566,7 +1460,6 @@ def shutdown():
             exc,
         )
 
-
     # ========================================================
     # ZOE RUNTIME
     # ========================================================
@@ -1582,15 +1475,12 @@ def shutdown():
             exc,
         )
 
-
     print(
         "[FLASK] ZOE shutdown complete."
     )
 
 
-atexit.register(
-    shutdown
-)
+atexit.register(shutdown)
 
 
 # ============================================================
@@ -1603,9 +1493,7 @@ def main() -> None:
 
     print()
 
-    print(
-        "=" * 52
-    )
+    print("=" * 52)
 
     print(
         f"                 {SERVICE_NAME}"
@@ -1615,15 +1503,11 @@ def main() -> None:
         "             FLASK API SERVER"
     )
 
-    print(
-        "=" * 52
-    )
+    print("=" * 52)
 
     print()
 
-    print(
-        "Frontend:"
-    )
+    print("Frontend:")
 
     print(
         f"  {FRONTEND_URL}"
@@ -1631,9 +1515,7 @@ def main() -> None:
 
     print()
 
-    print(
-        "Backend:"
-    )
+    print("Backend:")
 
     print(
         f"  http://127.0.0.1:{BACKEND_PORT}"
@@ -1641,9 +1523,7 @@ def main() -> None:
 
     print()
 
-    print(
-        "Realtime STT:"
-    )
+    print("Realtime STT:")
 
     print(
         "  GET /api/stt"
@@ -1651,9 +1531,7 @@ def main() -> None:
 
     print()
 
-    print(
-        "State:"
-    )
+    print("State:")
 
     print(
         "  GET /api/state"
@@ -1661,9 +1539,7 @@ def main() -> None:
 
     print()
 
-    print(
-        "Activity:"
-    )
+    print("Activity:")
 
     print(
         "  GET /api/activity"
@@ -1671,9 +1547,7 @@ def main() -> None:
 
     print()
 
-    print(
-        "Runtime events:"
-    )
+    print("Runtime events:")
 
     print(
         "  GET /api/events"
@@ -1681,9 +1555,7 @@ def main() -> None:
 
     print()
 
-    print(
-        "Response:"
-    )
+    print("Response:")
 
     print(
         "  GET /api/response"
@@ -1691,9 +1563,7 @@ def main() -> None:
 
     print()
 
-    print(
-        "Chat:"
-    )
+    print("Chat:")
 
     print(
         "  POST /api/chat"
@@ -1701,9 +1571,7 @@ def main() -> None:
 
     print()
 
-    print(
-        "Microphone:"
-    )
+    print("Microphone:")
 
     print(
         "  GET  /api/microphone"
@@ -1719,9 +1587,7 @@ def main() -> None:
 
     print()
 
-    print(
-        "Speech:"
-    )
+    print("Speech:")
 
     print(
         "  POST /api/speech/stop"
@@ -1729,9 +1595,7 @@ def main() -> None:
 
     print()
 
-    print(
-        "Telegram:"
-    )
+    print("Telegram:")
 
     print(
         "  Enabled:",
@@ -1745,7 +1609,6 @@ def main() -> None:
     )
 
     print()
-
 
     app.run(
         host=BACKEND_HOST,

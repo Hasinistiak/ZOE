@@ -1,8 +1,10 @@
 from __future__ import annotations
-
+import shutil
 import io
 import os
 import queue
+import subprocess
+import tempfile
 import threading
 import time
 from dataclasses import dataclass
@@ -15,7 +17,7 @@ import torch
 import torch.nn.functional as F
 from scipy.signal import butter, sosfilt
 
-from backend.listening import get_bridge
+from backend.speech.listening import get_bridge
 
 from dotenv import load_dotenv
 from groq import Groq
@@ -3058,6 +3060,367 @@ _stt: Optional[
 
 _stt_global_lock = threading.RLock()
 
+
+# ============================================================
+# TELEGRAM / FILE TRANSCRIPTION
+# ============================================================
+
+def transcribe_audio_file(
+    audio_path: str,
+) -> Optional[str]:
+    """
+    Transcribe an external audio file through the same
+    Groq Whisper engine used by ZOE.
+
+    Telegram sends voice messages as OGG/Opus. FFmpeg is used
+    to normalize the audio to 16 kHz mono PCM WAV before
+    sending it to Groq.
+
+    Returns:
+        Clean transcript string, or None on failure.
+    """
+
+    path = Path(audio_path)
+
+    if not path.is_file():
+
+        print(
+            "[ZOE STT] "
+            f"Audio file not found: {audio_path}"
+        )
+
+        return None
+
+    ffmpeg = shutil.which("ffmpeg")
+
+    if ffmpeg is None:
+
+        print(
+            "[ZOE STT] "
+            "FFmpeg is required for file transcription "
+            "but was not found."
+        )
+
+        return None
+
+    wav_path = None
+
+    try:
+
+        # ----------------------------------------------------
+        # Temporary normalized WAV
+        # ----------------------------------------------------
+
+        fd, wav_path = tempfile.mkstemp(
+            prefix="zoe_stt_",
+            suffix=".wav",
+        )
+
+        os.close(fd)
+
+        command = [
+            ffmpeg,
+
+            "-y",
+
+            "-loglevel",
+            "error",
+
+            "-i",
+            str(path),
+
+            "-ac",
+            "1",
+
+            "-ar",
+            str(SAMPLE_RATE),
+
+            "-c:a",
+            "pcm_s16le",
+
+            wav_path,
+        ]
+
+        result = subprocess.run(
+            command,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            timeout=120,
+            check=False,
+        )
+
+        if result.returncode != 0:
+
+            error = (
+                result.stderr
+                .decode(
+                    "utf-8",
+                    errors="replace",
+                )
+                .strip()
+            )
+
+            print(
+                "[ZOE STT] "
+                "FFmpeg conversion failed: "
+                f"{error or 'unknown error'}"
+            )
+
+            return None
+
+        # ----------------------------------------------------
+        # Read WAV
+        # ----------------------------------------------------
+
+        sample_rate, audio = wav.read(
+            wav_path
+        )
+
+        if audio is None:
+
+            return None
+
+        # ----------------------------------------------------
+        # Convert to mono
+        # ----------------------------------------------------
+
+        if audio.ndim > 1:
+
+            audio = np.mean(
+                audio,
+                axis=1,
+            )
+
+        # ----------------------------------------------------
+        # Convert PCM -> float32
+        # ----------------------------------------------------
+
+        if np.issubdtype(
+            audio.dtype,
+            np.integer,
+        ):
+
+            info = np.iinfo(
+                audio.dtype
+            )
+
+            scale = max(
+                abs(info.min),
+                info.max,
+            )
+
+            audio = (
+                audio.astype(
+                    np.float32
+                )
+                / float(scale)
+            )
+
+        else:
+
+            audio = audio.astype(
+                np.float32
+            )
+
+        audio = np.clip(
+            audio,
+            -1.0,
+            1.0,
+        )
+
+        if audio.size == 0:
+
+            return None
+
+        # ----------------------------------------------------
+        # Resample safety
+        #
+        # FFmpeg should already give us 16 kHz, but keep this
+        # guard so the function remains safe if that changes.
+        # ----------------------------------------------------
+
+        if sample_rate != SAMPLE_RATE:
+
+            print(
+                "[ZOE STT] "
+                f"Unexpected sample rate: "
+                f"{sample_rate} Hz"
+            )
+
+            return None
+
+        # ----------------------------------------------------
+        # Duration
+        # ----------------------------------------------------
+
+        duration = (
+            len(audio)
+            / SAMPLE_RATE
+        )
+
+        if duration < MIN_SPEECH_SECONDS:
+
+            print(
+                "[ZOE STT] "
+                f"Telegram audio too short: "
+                f"{duration:.2f}s"
+            )
+
+            return None
+
+        # ----------------------------------------------------
+        # DSP
+        #
+        # Use a temporary ZoeSTT instance only for the audio
+        # cleanup/transcription helpers would be expensive
+        # because its constructor loads ECAPA/VAD.
+        #
+        # Therefore we keep this path intentionally focused
+        # on Groq transcription.
+        # ----------------------------------------------------
+
+        # Remove DC offset.
+        audio = (
+            audio
+            - np.mean(audio)
+        )
+
+        # Normalize conservatively.
+        peak = float(
+            np.max(
+                np.abs(audio)
+            )
+        )
+
+        if peak > 1.0:
+
+            audio = (
+                audio
+                / peak
+            )
+
+        # ----------------------------------------------------
+        # Groq Whisper
+        # ----------------------------------------------------
+
+        # Reuse the existing global STT engine when available.
+        with _stt_global_lock:
+
+            engine = _stt
+
+        if engine is not None:
+
+            text = (
+                engine._transcribe_with_groq(
+                    audio
+                )
+            )
+
+        else:
+
+            # ------------------------------------------------
+            # No running ZOE STT instance.
+            #
+            # Use a lightweight temporary object without
+            # running its constructor.
+            # ------------------------------------------------
+
+            engine = object.__new__(
+                ZoeSTT
+            )
+
+            engine.model_name = GROQ_MODEL
+
+            text = (
+                engine._transcribe_with_groq(
+                    audio
+                )
+            )
+
+        if not text:
+
+            print(
+                "[ZOE STT] "
+                "Groq returned no transcription."
+            )
+
+            return None
+
+        # ----------------------------------------------------
+        # Existing cleanup
+        # ----------------------------------------------------
+
+        text = (
+            ZoeSTT._remove_repeated_text(
+                text
+            )
+        )
+
+        text = (
+            ZoeSTT._clean_text(
+                text
+            )
+        )
+
+        if not text:
+
+            return None
+
+        # ----------------------------------------------------
+        # Existing hallucination protection
+        # ----------------------------------------------------
+
+        if ZoeSTT._looks_like_hallucination(
+            text,
+            duration,
+        ):
+
+            print(
+                "[ZOE STT] "
+                f"Ignored Telegram hallucination: "
+                f"{text!r}"
+            )
+
+            return None
+
+        print(
+            "[ZOE STT] "
+            f"Telegram transcript: {text}"
+        )
+
+        return text
+
+    except subprocess.TimeoutExpired:
+
+        print(
+            "[ZOE STT] "
+            "FFmpeg audio conversion timed out."
+        )
+
+        return None
+
+    except Exception as e:
+
+        print(
+            "[ZOE STT] "
+            f"File transcription failed: {e}"
+        )
+
+        return None
+
+    finally:
+
+        if wav_path:
+
+            try:
+
+                os.remove(
+                    wav_path
+                )
+
+            except OSError:
+
+                pass
 
 # ============================================================
 # START

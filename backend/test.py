@@ -1,103 +1,168 @@
-
 from __future__ import annotations
 
-import os
-import time
+import json
+import sys
+from pathlib import Path
+from typing import Any
 
-from google import genai
-from dotenv import load_dotenv
+# ============================================================
+# PROJECT PATH
+# ============================================================
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 
-load_dotenv()
+# ============================================================
+# MEMORY
+# ============================================================
+
+from backend.memory import memory_retriever
+
 
 # ============================================================
 # CONFIG
 # ============================================================
 
-MODELS = [
-    "gemini-3.5-flash-lite",
-    "gemini-3.1-flash-lite",
-    "gemini-3.6-flash",
-]
-
-PROMPT = """
-You are the reasoning core of a personal AI assistant.
-Analyze this request and respond with a concise answer:
-
-The user wants to create a Python desktop application that monitors
-system resources and alerts them when CPU temperature becomes too high.
-What are the main components the application needs?
-"""
-
-ROUNDS = 3
+MAX_MEMORIES = 5
 
 
 # ============================================================
-# CLIENT
+# MEMORY QUERY
 # ============================================================
 
-api_key = os.getenv("GEMINI_API_KEY")
+def query_memory(query: str) -> list[dict[str, Any]]:
+    """
+    Query ZOE's long-term memory directly.
+    """
 
-if not api_key:
-    raise RuntimeError("GEMINI_API_KEY environment variable is not set.")
+    query = query.strip()
 
-client = genai.Client(api_key=api_key)
+    if not query:
+        return []
+
+    memories = memory_retriever.retrieve(
+        query=query,
+        limit=MAX_MEMORIES,
+        retrieval_context="",
+    )
+
+    if not isinstance(memories, list):
+        return []
+
+    return [
+        dict(memory)
+        for memory in memories
+        if isinstance(memory, dict)
+    ]
 
 
 # ============================================================
-# BENCHMARK
+# DISPLAY
 # ============================================================
 
-print("=" * 70)
-print("              GEMINI SPEED BENCHMARK")
-print("=" * 70)
+def print_memories(
+    query: str,
+    memories: list[dict[str, Any]],
+) -> None:
 
-print(f"\nRounds per model: {ROUNDS}")
+    print()
+    print("=" * 70)
+    print("ZOE MEMORY QUERY")
+    print("=" * 70)
 
-for model in MODELS:
-    print("\n" + "-" * 70)
-    print(f"MODEL: {model}")
-    print("-" * 70)
+    print(f"\nQuery:\n{query}")
 
-    times: list[float] = []
+    print(f"\nRetrieved: {len(memories)}")
 
-    for round_number in range(1, ROUNDS + 1):
-        print(f"[{round_number}/{ROUNDS}] Testing...", end=" ", flush=True)
+    if not memories:
+        print("\nNo relevant memories found.")
+        print()
+        return
 
-        start = time.perf_counter()
+    print()
+
+    for index, memory in enumerate(memories, start=1):
+
+        print("-" * 70)
+        print(f"MEMORY #{index}")
+        print("-" * 70)
+
+        print(
+            json.dumps(
+                memory,
+                indent=2,
+                ensure_ascii=False,
+                default=str,
+            )
+        )
+
+    print()
+
+
+# ============================================================
+# CLI
+# ============================================================
+
+def main() -> None:
+
+    print()
+    print("=" * 70)
+    print("ZOE LONG-TERM MEMORY TEST")
+    print("=" * 70)
+    print()
+    print("Type a query to search memory.")
+    print("Type 'exit' or 'quit' to stop.")
+    print()
+
+    while True:
 
         try:
-            response = client.models.generate_content(
-                model=model,
-                contents=PROMPT,
+            query = input("MEMORY QUERY: ").strip()
+
+        except KeyboardInterrupt:
+            print("\n")
+            break
+
+        except EOFError:
+            print()
+            break
+
+        if not query:
+            continue
+
+        if query.lower() in {
+            "exit",
+            "quit",
+        }:
+            break
+
+        try:
+
+            memories = query_memory(query)
+
+            print_memories(
+                query=query,
+                memories=memories,
             )
 
-            elapsed = time.perf_counter() - start
-            times.append(elapsed)
-
-            text = response.text or ""
-
-            print(f"{elapsed:.2f}s")
-
-            if round_number == 1:
-                print(f"Response: {text[:250].replace(chr(10), ' ')}")
-
         except Exception as exc:
-            elapsed = time.perf_counter() - start
-            print(f"FAILED after {elapsed:.2f}s")
-            print(f"Error: {exc}")
 
-    if times:
-        average = sum(times) / len(times)
-        fastest = min(times)
-        slowest = max(times)
-
-        print("\nResults:")
-        print(f"  Average : {average:.2f}s")
-        print(f"  Fastest : {fastest:.2f}s")
-        print(f"  Slowest : {slowest:.2f}s")
+            print()
+            print("=" * 70)
+            print("MEMORY ERROR")
+            print("=" * 70)
+            print(
+                f"{type(exc).__name__}: {exc}"
+            )
+            print()
 
 
-print("\n" + "=" * 70)
-print("Benchmark complete.")
-print("=" * 70)
+# ============================================================
+# ENTRY POINT
+# ============================================================
+
+if __name__ == "__main__":
+    main()
