@@ -19,9 +19,9 @@ from pydantic import BaseModel, Field
 from google import genai
 from google.genai import types
 
-from backend.context import get_identity, get_user_context
-from backend.context.agents import AGENTS, get_agent_descriptions
-from backend.context.time import get_time_context
+from backend.memory import get_identity, get_user_context
+from backend.brain.agents import AGENTS, get_agent_descriptions
+from backend.memory.time import get_time_context
 
 
 # ============================================================
@@ -372,7 +372,7 @@ gemini_clients: list[genai.Client] = [
 # CONTEXT FILES
 # ============================================================
 
-CONTEXT_DIR = PROJECT_ROOT / "backend" / "context"
+CONTEXT_DIR = PROJECT_ROOT / "backend" / "memory"
 
 IDENTITY_FILE = CONTEXT_DIR / "Identity.md"
 SOUL_FILE = CONTEXT_DIR / "Soul.md"

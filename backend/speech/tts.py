@@ -9,6 +9,7 @@ import logging
 import os
 import queue
 import re
+import sys
 import tempfile
 import threading
 import time
@@ -33,8 +34,6 @@ SAMPLER_DECODE_STEPS = max(
 )
 
 # Larger chunks reduce Pocket TTS call overhead.
-# 260 was reasonable, but 320 gives better throughput while still
-# preserving streaming responsiveness.
 MAX_CHUNK_LENGTH = max(
     120,
     int(os.getenv("ZOE_TTS_CHUNK", "320")),
@@ -48,12 +47,6 @@ MAX_AUDIO_QUEUE = max(
 )
 
 SAMPLE_RATE = 24_000
-
-# Generation queue normally contains only the current utterance chunks.
-MAX_GENERATION_QUEUE = max(
-    8,
-    MAX_AUDIO_QUEUE * 2,
-)
 
 TTS_DEVICE = (
     os.getenv("ZOE_TTS_DEVICE", "").strip()
@@ -247,31 +240,14 @@ def _cancel_state(
 # QUEUES
 # ============================================================================
 
-_generation_queue: queue.Queue[SpeechRequest] = queue.Queue(
-    maxsize=MAX_GENERATION_QUEUE
-)
+# Unbounded on purpose: it only ever holds the TEXT chunks of the current
+# utterance (cleared on every new speak/stop). A bounded queue silently
+# dropped any reply longer than a dozen sentences. Audio backpressure is
+# handled by _audio_queue, which stays small.
+_generation_queue: queue.Queue[SpeechRequest] = queue.Queue()
 
-# Store FLOAT32 directly.
-#
-# Old implementation:
-#
-# Pocket TTS float
-#       ↓
-# int16
-#       ↓
-# float32
-#       ↓
-# sounddevice
-#
-# New implementation:
-#
-# Pocket TTS float
-#       ↓
-# float32
-#       ↓
-# sounddevice
-#
-# Less CPU and less copying.
+# Audio is stored as FLOAT32 end to end (Pocket TTS -> float32 -> sounddevice),
+# which avoids int16 round trips and extra copying.
 _audio_queue: queue.Queue[
     tuple[int, np.ndarray]
 ] = queue.Queue(
@@ -423,16 +399,122 @@ def _set_speaking(
 # ============================================================================
 # TEXT NORMALIZATION
 # ============================================================================
+#
+# Pocket TTS reads numerals unreliably (digit by digit, mangled clock times,
+# unit abbreviations as letters).  So numbers, times, dates, currency and
+# units are converted to plain spoken English BEFORE they reach the model.
 
-# IMPORTANT:
-#
-# This normalizer is intentionally conservative.
-#
-# Pocket TTS is an English TTS model, not a code reader.
-# Trying to convert every number, symbol, URL and date manually causes
-# more pronunciation problems than it solves.
-#
-# We only fix patterns that are consistently problematic.
+_ONES = [
+    "zero", "one", "two", "three", "four", "five", "six", "seven", "eight",
+    "nine", "ten", "eleven", "twelve", "thirteen", "fourteen", "fifteen",
+    "sixteen", "seventeen", "eighteen", "nineteen",
+]
+_TENS = ["", "", "twenty", "thirty", "forty", "fifty", "sixty", "seventy",
+         "eighty", "ninety"]
+_SCALES = [
+    (10**12, "trillion"), (10**9, "billion"),
+    (10**6, "million"), (10**3, "thousand"),
+]
+_DIGITS = {str(i): w for i, w in enumerate(_ONES[:10])}
+_MONTH_NAMES = [
+    "January", "February", "March", "April", "May", "June", "July",
+    "August", "September", "October", "November", "December",
+]
+
+# Positive number, optional thousands commas, optional decimals.
+_NUM = r"(?:\d{1,3}(?:,\d{3})+|\d+)(?:\.\d+)?"
+
+
+def _spell_digits(s: str) -> str:
+    return " ".join(_DIGITS[d] for d in s if d in _DIGITS)
+
+
+def _int_to_words(n: int) -> str:
+    if n < 0:
+        return "minus " + _int_to_words(-n)
+    if n < 20:
+        return _ONES[n]
+    if n < 100:
+        t, o = divmod(n, 10)
+        return _TENS[t] + (" " + _ONES[o] if o else "")
+    if n < 1000:
+        h, r = divmod(n, 100)
+        return _ONES[h] + " hundred" + (" " + _int_to_words(r) if r else "")
+    for value, name in _SCALES:
+        if n >= value:
+            q, r = divmod(n, value)
+            return (_int_to_words(q) + " " + name
+                    + (" " + _int_to_words(r) if r else ""))
+    return str(n)
+
+
+def _number_to_words(raw: str) -> str:
+    """'1,234.5' -> 'one thousand two hundred thirty four point five'."""
+    s = raw.strip()
+    neg = s.startswith("-")
+    if neg:
+        s = s[1:]
+    grouped = "," in s
+    s = s.replace(",", "")
+    whole, _, frac = s.partition(".")
+    whole = whole or "0"
+
+    # Codes / phone numbers / leading zeros are read digit by digit.
+    if not grouped and not frac and (
+        len(whole) >= 7 or (len(whole) > 1 and whole[0] == "0")
+    ):
+        out = _spell_digits(whole)
+    else:
+        out = _int_to_words(int(whole))
+        if frac:
+            out += " point " + _spell_digits(frac)
+
+    return ("minus " + out) if neg else out
+
+
+def _pairs_to_words(digits: str) -> str:
+    """Years and model numbers: 2026 -> twenty twenty six, 480 -> four eighty."""
+    n = int(digits)
+
+    if len(digits) == 4:
+        if n % 1000 == 0:
+            return _int_to_words(n)
+        if 2000 <= n <= 2009:
+            return "two thousand " + _ONES[n - 2000]
+        a, b = divmod(n, 100)
+        if b == 0:
+            return _int_to_words(a) + " hundred"
+        if b < 10:
+            return _int_to_words(a) + " oh " + _ONES[b]
+        return _int_to_words(a) + " " + _int_to_words(b)
+
+    if len(digits) == 3:
+        a, b = divmod(n, 100)
+        if b == 0:
+            return _int_to_words(n)
+        if b < 10:
+            return _ONES[a] + " oh " + _ONES[b]
+        return _ONES[a] + " " + _int_to_words(b)
+
+    return _number_to_words(digits)
+
+
+_ORD_IRREGULAR = {
+    "one": "first", "two": "second", "three": "third", "five": "fifth",
+    "eight": "eighth", "nine": "ninth", "twelve": "twelfth",
+}
+
+
+def _ordinal_words(n: int) -> str:
+    words = _int_to_words(n).split(" ")
+    last = words[-1]
+    if last in _ORD_IRREGULAR:
+        words[-1] = _ORD_IRREGULAR[last]
+    elif last.endswith("y"):
+        words[-1] = last[:-1] + "ieth"
+    else:
+        words[-1] = last + "th"
+    return " ".join(words)
 
 
 # ---------------------------------------------------------------------------
@@ -440,369 +522,570 @@ def _set_speaking(
 # ---------------------------------------------------------------------------
 
 def _clean_markdown(text: str) -> str:
-
-    # Remove fenced code blocks completely.
-    text = re.sub(
-        r"```[\s\S]*?```",
-        "",
-        text,
-    )
-
-    # Markdown links -> visible text.
-    text = re.sub(
-        r"\[([^\]]+)\]\([^)]+\)",
-        r"\1",
-        text,
-    )
-
-    # Inline code.
-    text = re.sub(
-        r"`([^`]+)`",
-        r"\1",
-        text,
-    )
-
-    # Headers.
-    text = re.sub(
-        r"(?m)^\s*#{1,6}\s+",
-        "",
-        text,
-    )
-
-    # Bullets.
-    text = re.sub(
-        r"(?m)^\s*[-*•]\s+",
-        "",
-        text,
-    )
-
-    # Bold / italic markers.
-    text = text.replace("**", "")
-    text = text.replace("__", "")
-    text = text.replace("*", "")
-    text = text.replace("_", " ")
-
+    text = re.sub(r"```[\s\S]*?```", "", text)
+    text = re.sub(r"\[([^\]]+)\]\([^)]+\)", r"\1", text)
+    text = re.sub(r"`([^`]+)`", r"\1", text)
+    text = re.sub(r"(?m)^\s*#{1,6}\s+", "", text)
+    text = re.sub(r"(?m)^\s*[-*•]\s+", "", text)
+    text = text.replace("**", "").replace("__", "").replace("*", "")
+    # Only strip emphasis underscores. snake_case / emails / URLs keep theirs
+    # until they have been handled (final cleanup turns leftovers into spaces).
+    text = re.sub(r"(?<!\w)_+|_+(?!\w)", "", text)
     return text
 
 
 # ---------------------------------------------------------------------------
-# Security codes
+# Emails / URLs / security codes
 # ---------------------------------------------------------------------------
+
+_EMAIL = re.compile(
+    r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b"
+)
+
+
+def _replace_emails(text: str) -> str:
+    return _EMAIL.sub(
+        lambda m: (
+            m.group(0)
+            .replace("@", " at ")
+            .replace(".", " dot ")
+            .replace("_", " underscore ")
+            .replace("-", " dash ")
+        ),
+        text,
+    )
+
+
+_URL = re.compile(r"\b(?:https?://|www\.)[^\s<>\"']+", re.IGNORECASE)
+
+
+def _replace_urls(text: str) -> str:
+
+    def replace(match: re.Match[str]) -> str:
+        value = match.group(0)
+        trailing = ""
+        while value and value[-1] in ".,!?;:)":
+            trailing = value[-1] + trailing
+            value = value[:-1]
+        value = re.sub(r"^https?://", "", value, flags=re.IGNORECASE)
+        value = re.sub(r"^www\.", "", value, flags=re.IGNORECASE)
+        value = (
+            value.replace("/", " slash ")
+            .replace("_", " underscore ")
+            .replace("-", " dash ")
+            .replace(".", " dot ")
+        )
+        return value + trailing
+
+    return _URL.sub(replace, text)
+
 
 _SECURITY_CODE = re.compile(
     r"\b("
-    r"security\s+code|"
-    r"verification\s+code|"
-    r"verify\s+code|"
-    r"authentication\s+code|"
-    r"auth\s+code|"
-    r"access\s+code|"
-    r"one[- ]time\s+password|"
-    r"one[- ]time\s+code|"
-    r"otp"
+    r"security\s+code|verification\s+code|verify\s+code|"
+    r"authentication\s+code|auth\s+code|access\s+code|"
+    r"one[- ]time\s+password|one[- ]time\s+code|otp"
     r")\s*[:#-]?\s*(\d{4,8})\b",
     re.IGNORECASE,
 )
 
 
-_DIGITS = {
-    "0": "zero",
-    "1": "one",
-    "2": "two",
-    "3": "three",
-    "4": "four",
-    "5": "five",
-    "6": "six",
-    "7": "seven",
-    "8": "eight",
-    "9": "nine",
-}
-
-
-def _replace_security_codes(
-    text: str,
-) -> str:
-
-    def replace(match: re.Match[str]) -> str:
-
-        label = match.group(1)
-        code = match.group(2)
-
-        spoken = " ".join(
-            _DIGITS[d]
-            for d in code
-        )
-
-        return f"{label} {spoken}"
-
+def _replace_security_codes(text: str) -> str:
     return _SECURITY_CODE.sub(
-        replace,
-        text,
+        lambda m: f"{m.group(1)} {_spell_digits(m.group(2))}", text
     )
 
 
 # ---------------------------------------------------------------------------
-# Tech model names
-# ---------------------------------------------------------------------------
-
-# Only split letter -> digit boundaries.
-#
-# T480    -> T 480
-# RTX4090 -> RTX 4090
-# USB3    -> USB 3
-# A320    -> A 320
-#
-# Do NOT touch:
-#
-# 5G
-# 2FA
-# 802.11
-# 192.168.1.1
-#
-_LETTER_DIGIT = re.compile(
-    r"(?<=[A-Za-z])(?=\d)"
-)
-
-
-def _split_tech_names(
-    text: str,
-) -> str:
-
-    return _LETTER_DIGIT.sub(
-        " ",
-        text,
-    )
-
-
-# ---------------------------------------------------------------------------
-# Common acronyms
+# Special words
 # ---------------------------------------------------------------------------
 
 _ACRONYMS = {
     "ZOE": "Zoe",
+    "2FA": "two factor authentication",
 }
 
-
 _ACRONYM_PATTERN = re.compile(
-    r"\b("
-    + "|".join(
-        re.escape(x)
-        for x in sorted(
-            _ACRONYMS,
-            key=len,
-            reverse=True,
-        )
-    )
-    + r")\b",
+    r"\b(" + "|".join(
+        re.escape(k) for k in sorted(_ACRONYMS, key=len, reverse=True)
+    ) + r")\b",
     re.IGNORECASE,
 )
 
 
-def _replace_acronyms(
-    text: str,
-) -> str:
-
-    def replace(match: re.Match[str]) -> str:
-
-        value = match.group(1)
-
-        return _ACRONYMS.get(
-            value.upper(),
-            value,
-        )
-
+def _replace_acronyms(text: str) -> str:
     return _ACRONYM_PATTERN.sub(
-        replace,
+        lambda m: _ACRONYMS.get(m.group(1).upper(), m.group(1)), text
+    )
+
+
+# ---------------------------------------------------------------------------
+# Acronyms that must be spelled letter by letter
+# ---------------------------------------------------------------------------
+#
+# Pocket TTS tries to read unknown letter groups as words ("API" -> "epy").
+# These are spaced out so each letter is pronounced: API -> "A P I",
+# APIs -> "A P Is".
+#
+# To add one, just add its lowercase form to the right set.
+
+# Safe in any case: none of these are ordinary English words.
+_SPELLED_ANY_CASE = {
+    "api", "cpu", "gpu", "npu", "usb", "hdmi", "ssd", "hdd", "lcd", "gpio",
+    "html", "css", "json", "yaml", "sql", "ssh", "url", "uri", "http",
+    "https", "dns", "vpn", "pdf", "sdk", "cli", "ui", "ux", "tts", "stt",
+    "llm", "ssid", "rtx", "gtx", "oauth", "cors", "ocr", "ide",
+}
+
+# Only when written in capitals ("OS", "ID"), because "os", "id", "led",
+# "ip" and so on are also ordinary words or fragments.
+_SPELLED_UPPER_ONLY = {
+    "AI", "OS", "ID", "PC", "TV", "LED", "IP", "ML", "UK", "US", "RAM",
+}
+
+# Not letter by letter.
+_SPELLED_OVERRIDES = {
+    "wifi": "Wi Fi",
+}
+
+_SPELLED_ANY_RE = re.compile(
+    r"\b("
+    + "|".join(
+        re.escape(k)
+        for k in sorted(
+            _SPELLED_ANY_CASE | set(_SPELLED_OVERRIDES), key=len, reverse=True
+        )
+    )
+    + r")(s?)\b",
+    re.IGNORECASE,
+)
+
+_SPELLED_UPPER_RE = re.compile(
+    r"\b("
+    + "|".join(
+        re.escape(k) for k in sorted(_SPELLED_UPPER_ONLY, key=len, reverse=True)
+    )
+    + r")(s?)\b"
+)
+
+
+def _spell_acronym(word: str, plural: str) -> str:
+    override = _SPELLED_OVERRIDES.get(word.lower())
+    if override:
+        return override + plural
+    return " ".join(word.upper()) + plural
+
+
+def _replace_spelled_acronyms(text: str) -> str:
+    text = _SPELLED_ANY_RE.sub(
+        lambda m: _spell_acronym(m.group(1), m.group(2)), text
+    )
+    text = _SPELLED_UPPER_RE.sub(
+        lambda m: _spell_acronym(m.group(1), m.group(2)), text
+    )
+    return text
+
+
+# ---------------------------------------------------------------------------
+# Dates
+# ---------------------------------------------------------------------------
+
+_ISO_DATE = re.compile(
+    r"\b(\d{4})-(0?[1-9]|1[0-2])-(0?[1-9]|[12]\d|3[01])\b"
+)
+
+
+def _replace_iso_dates(text: str) -> str:
+    return _ISO_DATE.sub(
+        lambda m: (
+            f"{_MONTH_NAMES[int(m.group(2)) - 1]} "
+            f"{_ordinal_words(int(m.group(3)))}, "
+            f"{_pairs_to_words(m.group(1))}"
+        ),
         text,
     )
+
+
+_MONTHS = (
+    r"(?:January|February|March|April|May|June|July|August|September|"
+    r"October|November|December|Jan|Feb|Mar|Apr|Jun|Jul|Aug|Sept|Sep|"
+    r"Oct|Nov|Dec)"
+)
+_YEAR = r"(?:1[5-9]|20)\d\d"
+
+# "October 4, 2026" / "Oct 2026"
+_YEAR_AFTER_MONTH = re.compile(
+    r"\b(" + _MONTHS + r"\.?\s+(?:\d{1,2}(?:st|nd|rd|th)?,?\s+)?)(" + _YEAR + r")\b"
+)
+# "in 2026", "since 1999"
+_YEAR_CONTEXT = re.compile(
+    r"\b(in|since|until|till|during|year)\s+(" + _YEAR + r")\b",
+    re.IGNORECASE,
+)
+
+
+def _replace_years(text: str) -> str:
+    text = _YEAR_AFTER_MONTH.sub(
+        lambda m: m.group(1) + _pairs_to_words(m.group(2)), text
+    )
+    text = _YEAR_CONTEXT.sub(
+        lambda m: m.group(1) + " " + _pairs_to_words(m.group(2)), text
+    )
+    return text
 
 
 # ---------------------------------------------------------------------------
 # Times
 # ---------------------------------------------------------------------------
 
+def _clock_words(hour: int, minute: int) -> str:
+    out = _int_to_words(hour)
+    if minute:
+        out += (" oh " + _ONES[minute]) if minute < 10 else (
+            " " + _int_to_words(minute)
+        )
+    return out
+
+
+# 10 PM / 10:30 PM / 10:30 p.m.
 _TIME_12 = re.compile(
-    r"\b(0?\d|1[0-2]):([0-5]\d)\s*(AM|PM)\b",
+    r"(?<![\d:.])(\d{1,2})(?::([0-5]\d))?\s*(AM|PM|A\.M\.|P\.M\.)(?!\w)",
     re.IGNORECASE,
 )
 
 
-def _replace_times(
-    text: str,
-) -> str:
+def _replace_times_12(text: str) -> str:
 
-    def replace(match: re.Match[str]) -> str:
+    def replace(m: re.Match[str]) -> str:
+        hour = int(m.group(1))
+        minute = int(m.group(2) or 0)
+        if not 1 <= hour <= 12:
+            return m.group(0)
+        period = "A M" if m.group(3).upper().startswith("A") else "P M"
+        return f"{_clock_words(hour, minute)} {period}"
 
-        hour = int(match.group(1))
-        minute = int(match.group(2))
-        period = match.group(3).upper()
+    return _TIME_12.sub(replace, text)
 
-        period_text = (
-            "A M"
-            if period == "AM"
-            else "P M"
-        )
 
-        if minute == 0:
-            return f"{hour} {period_text}"
+# 22:35 / 07:05 / 1:30
+_TIME_24 = re.compile(r"(?<![\d:.])([01]?\d|2[0-3]):([0-5]\d)(?![\d:])")
 
-        return f"{hour} {minute} {period_text}"
 
-    return _TIME_12.sub(
-        replace,
-        text,
-    )
+def _replace_times_24(text: str) -> str:
+
+    def replace(m: re.Match[str]) -> str:
+        hs = m.group(1)
+        hour = int(hs)
+        minute = int(m.group(2))
+
+        if hour == 0 and minute == 0:
+            return "midnight"
+        if hour == 12 and minute == 0:
+            return "noon"
+
+        if hour > 12:
+            hour12, period = hour - 12, "P M"
+        elif hour == 0:
+            hour12, period = 12, "A M"
+        elif hour == 12:
+            hour12, period = 12, "P M"
+        else:
+            hour12 = hour
+            # "07:30" is obviously morning; "1:30" is ambiguous -> no suffix.
+            period = "A M" if hs.startswith("0") else ""
+
+        out = _clock_words(hour12, minute)
+        if minute == 0 and not period:
+            out += " o'clock"
+        return f"{out} {period}".strip()
+
+    return _TIME_24.sub(replace, text)
 
 
 # ---------------------------------------------------------------------------
-# Percentages
+# Currency
 # ---------------------------------------------------------------------------
 
-_PERCENT = re.compile(
-    r"\b(\d+(?:\.\d+)?)%",
+# symbol -> (major singular, major plural, minor singular, minor plural)
+_CURRENCY_NAMES = {
+    "$": ("dollar", "dollars", "cent", "cents"),
+    "€": ("euro", "euros", "cent", "cents"),
+    "£": ("pound", "pounds", "penny", "pence"),
+    "৳": ("taka", "taka", "poisha", "poisha"),
+}
+
+_CURRENCY = re.compile(
+    r"(?:([$€£৳])|(?<!\w)(?:Tk|BDT)\.?)\s?(" + _NUM + r")"
+    r"(?:\s?(thousand|million|billion|trillion)\b)?",
+    re.IGNORECASE,
 )
 
 
-def _replace_percentages(
-    text: str,
-) -> str:
+def _replace_currency(text: str) -> str:
 
+    def replace(m: re.Match[str]) -> str:
+        sym = m.group(1) or "৳"
+        raw = m.group(2)
+        scale = m.group(3)
+        maj_s, maj_p, min_s, min_p = _CURRENCY_NAMES[sym]
+
+        if scale:
+            return f"{_number_to_words(raw)} {scale.lower()} {maj_p}"
+
+        whole, _, frac = raw.replace(",", "").partition(".")
+        wn = int(whole)
+        cents = int((frac + "00")[:2]) if frac else 0
+
+        parts = []
+        if wn or not cents:
+            parts.append(f"{_int_to_words(wn)} {maj_s if wn == 1 else maj_p}")
+        if cents:
+            parts.append(f"{_int_to_words(cents)} {min_s if cents == 1 else min_p}")
+        return " and ".join(parts)
+
+    return _CURRENCY.sub(replace, text)
+
+
+# ---------------------------------------------------------------------------
+# Percent, ranges, temperature
+# ---------------------------------------------------------------------------
+
+_PERCENT = re.compile(r"(?<![\w.])(-?" + _NUM + r")\s?%")
+
+
+def _replace_percentages(text: str) -> str:
     return _PERCENT.sub(
-        lambda m: f"{m.group(1)} percent",
-        text,
+        lambda m: f"{_number_to_words(m.group(1))} percent", text
     )
 
 
-# ---------------------------------------------------------------------------
-# Email
-# ---------------------------------------------------------------------------
-
-_EMAIL = re.compile(
-    r"\b"
-    r"[A-Za-z0-9._%+-]+"
-    r"@"
-    r"[A-Za-z0-9.-]+"
-    r"\."
-    r"[A-Za-z]{2,}"
-    r"\b",
+# 10-20 / 10 – 20   (a plain " - " is left alone: could be subtraction)
+_RANGE = re.compile(
+    r"(?<![\w.-])(\d{1,4}(?:\.\d+)?)(?:-|\s?[–—]\s?)(\d{1,4}(?:\.\d+)?)(?![\d-])"
 )
 
 
-def _replace_emails(
-    text: str,
-) -> str:
-
-    def replace(match: re.Match[str]) -> str:
-
-        value = match.group(0)
-
-        return (
-            value
-            .replace("@", " at ")
-            .replace(".", " dot ")
-            .replace("_", " underscore ")
-            .replace("-", " dash ")
-        )
-
-    return _EMAIL.sub(
-        replace,
-        text,
-    )
+def _replace_ranges(text: str) -> str:
+    return _RANGE.sub(lambda m: f"{m.group(1)} to {m.group(2)}", text)
 
 
-# ---------------------------------------------------------------------------
-# URLs
-# ---------------------------------------------------------------------------
-
-_URL = re.compile(
-    r"\b(?:https?://|www\.)[^\s<>\"']+",
-    re.IGNORECASE,
+_TEMPERATURE = re.compile(
+    r"(?<![\w.])(-?" + _NUM + r")\s?(?:°\s?([CcFf])|℃|℉)(?!\w)"
 )
 
 
-def _replace_urls(
-    text: str,
-) -> str:
+def _replace_temperatures(text: str) -> str:
 
-    def replace(match: re.Match[str]) -> str:
+    def replace(m: re.Match[str]) -> str:
+        whole = m.group(0)
+        scale = (m.group(2) or ("C" if "℃" in whole else "F")).upper()
+        name = "Celsius" if scale == "C" else "Fahrenheit"
+        return f"{_number_to_words(m.group(1))} degrees {name}"
 
-        value = match.group(0)
+    text = _TEMPERATURE.sub(replace, text)
+    return text.replace("°", " degrees ")
 
-        trailing = ""
 
-        while value and value[-1] in ".,!?;:)":
+# ---------------------------------------------------------------------------
+# Units
+# ---------------------------------------------------------------------------
 
-            trailing = value[-1] + trailing
-            value = value[:-1]
+# Case-insensitive, optional space: "27 kph", "27KPH", "27 km/h"
+_UNITS_LOOSE = {
+    "km/h": ("kilometer per hour", "kilometers per hour"),
+    "kmph": ("kilometer per hour", "kilometers per hour"),
+    "kph": ("kilometer per hour", "kilometers per hour"),
+    "mph": ("mile per hour", "miles per hour"),
+    "m/s": ("meter per second", "meters per second"),
+    "km": ("kilometer", "kilometers"),
+    "cm": ("centimeter", "centimeters"),
+    "mm": ("millimeter", "millimeters"),
+    "kg": ("kilogram", "kilograms"),
+    "mg": ("milligram", "milligrams"),
+    "lbs": ("pound", "pounds"),
+    "lb": ("pound", "pounds"),
+    "oz": ("ounce", "ounces"),
+    "ml": ("milliliter", "milliliters"),
+    "kb": ("kilobyte", "kilobytes"),
+    "mb": ("megabyte", "megabytes"),
+    "gb": ("gigabyte", "gigabytes"),
+    "tb": ("terabyte", "terabytes"),
+    "kbps": ("kilobit per second", "kilobits per second"),
+    "mbps": ("megabit per second", "megabits per second"),
+    "gbps": ("gigabit per second", "gigabits per second"),
+    "hz": ("hertz", "hertz"),
+    "khz": ("kilohertz", "kilohertz"),
+    "mhz": ("megahertz", "megahertz"),
+    "ghz": ("gigahertz", "gigahertz"),
+    "kw": ("kilowatt", "kilowatts"),
+    "kwh": ("kilowatt hour", "kilowatt hours"),
+    "mah": ("milliamp hour", "milliamp hours"),
+    "kcal": ("calorie", "calories"),
+    "ms": ("millisecond", "milliseconds"),
+    "sec": ("second", "seconds"),
+    "secs": ("second", "seconds"),
+    "min": ("minute", "minutes"),
+    "mins": ("minute", "minutes"),
+    "hr": ("hour", "hours"),
+    "hrs": ("hour", "hours"),
+    "fps": ("frame per second", "frames per second"),
+    "rpm": ("revolution per minute", "revolutions per minute"),
+    "db": ("decibel", "decibels"),
+    "hpa": ("hectopascal", "hectopascals"),
+    "kpa": ("kilopascal", "kilopascals"),
+    "psi": ("P S I", "P S I"),
+    "ppm": ("part per million", "parts per million"),
+    "lux": ("lux", "lux"),
+}
 
-        value = re.sub(
-            r"^https?://",
-            "",
-            value,
-            flags=re.IGNORECASE,
-        )
+# Case-sensitive, NO space: "5m", "10s", "12V", "3A"
+_UNITS_TIGHT = {
+    "m": ("meter", "meters"),
+    "g": ("gram", "grams"),
+    "s": ("second", "seconds"),
+    "h": ("hour", "hours"),
+    "V": ("volt", "volts"),
+    "W": ("watt", "watts"),
+    "A": ("amp", "amps"),
+}
 
-        value = re.sub(
-            r"^www\.",
-            "",
-            value,
-            flags=re.IGNORECASE,
-        )
 
-        value = (
-            value
-            .replace("/", " slash ")
-            .replace("_", " underscore ")
-            .replace("-", " dash ")
-            .replace(".", " dot ")
-        )
+def _unit_regex(table: dict, spaced: bool, flags: int) -> re.Pattern[str]:
+    alt = "|".join(re.escape(k) for k in sorted(table, key=len, reverse=True))
+    gap = r"\s?" if spaced else ""
+    return re.compile(
+        r"(?<![\w.])(-?" + _NUM + r")" + gap + r"(" + alt + r")(?!\w)", flags
+    )
 
-        return value + trailing
 
-    return _URL.sub(
-        replace,
+_UNIT_LOOSE_RE = _unit_regex(_UNITS_LOOSE, True, re.IGNORECASE)
+_UNIT_TIGHT_RE = _unit_regex(_UNITS_TIGHT, False, 0)
+
+
+def _unit_replacer(table: dict, lower: bool):
+
+    def replace(m: re.Match[str]) -> str:
+        num = m.group(1)
+        unit = m.group(2).lower() if lower else m.group(2)
+        singular, plural = table[unit]
+        word = singular if num == "1" else plural
+        return f"{_number_to_words(num)} {word}"
+
+    return replace
+
+
+def _replace_units(text: str) -> str:
+    text = _UNIT_LOOSE_RE.sub(_unit_replacer(_UNITS_LOOSE, True), text)
+    text = _UNIT_TIGHT_RE.sub(_unit_replacer(_UNITS_TIGHT, False), text)
+    return text
+
+
+# A unit with no number in front of it ("what is the speed in kph?")
+_BARE_UNIT = re.compile(r"(?<![\w/])(km/h|kmph|kph|mph)(?![\w/])", re.IGNORECASE)
+
+
+def _replace_bare_units(text: str) -> str:
+    return _BARE_UNIT.sub(
+        lambda m: _UNITS_LOOSE[m.group(1).lower()][1], text
+    )
+
+
+# ---------------------------------------------------------------------------
+# Ordinals, versions, IPs, model names
+# ---------------------------------------------------------------------------
+
+_ORDINAL = re.compile(r"(?<![\w.])(\d{1,3}(?:,\d{3})*)(st|nd|rd|th)\b", re.IGNORECASE)
+
+
+def _replace_ordinals(text: str) -> str:
+    return _ORDINAL.sub(
+        lambda m: _ordinal_words(int(m.group(1).replace(",", ""))), text
+    )
+
+
+# v2.5.1 -> version two point five point one
+_VERSION = re.compile(r"\b[vV](\d+(?:\.\d+)*)\b")
+
+
+def _replace_versions(text: str) -> str:
+    return _VERSION.sub(
+        lambda m: "version " + " point ".join(
+            _int_to_words(int(p)) for p in m.group(1).split(".")
+        ),
+        text,
+    )
+
+
+# 192.168.0.101 -> digits with "dot";  1.2.3 -> one point two point three
+_DOTTED = re.compile(r"(?<![\w.])\d+(?:\.\d+){2,}(?![\w])")
+
+
+def _replace_dotted_numbers(text: str) -> str:
+
+    def replace(m: re.Match[str]) -> str:
+        parts = m.group(0).split(".")
+        if len(parts) == 4 and all(len(p) <= 3 and int(p) <= 255 for p in parts):
+            return " dot ".join(_spell_digits(p) for p in parts)
+        return " point ".join(_number_to_words(p) for p in parts)
+
+    return _DOTTED.sub(replace, text)
+
+
+# T480 -> T four eighty | RTX4090 -> RTX forty ninety | iPhone15 -> iPhone fifteen
+_MODEL_NAME = re.compile(r"\b([A-Za-z]+)(\d+)\b")
+
+
+def _replace_model_names(text: str) -> str:
+
+    def replace(m: re.Match[str]) -> str:
+        digits = m.group(2)
+        if len(digits) in (3, 4) and digits[0] != "0":
+            spoken = _pairs_to_words(digits)
+        else:
+            spoken = _number_to_words(digits)
+        return f"{m.group(1)} {spoken}"
+
+    return _MODEL_NAME.sub(replace, text)
+
+
+# 1080p -> ten eighty p
+_RESOLUTION = re.compile(r"(?<![\w.])(\d{3,4})([pi])\b")
+
+
+def _replace_resolutions(text: str) -> str:
+    return _RESOLUTION.sub(
+        lambda m: f"{_pairs_to_words(m.group(1))} {m.group(2)}", text
+    )
+
+
+# 5G -> five G | 4K -> four K | 3D -> three D
+_DIGIT_CAPS = re.compile(r"(?<![\w.])(\d+)([A-Z]{1,3})(?!\w)")
+
+
+def _replace_digit_caps(text: str) -> str:
+    return _DIGIT_CAPS.sub(
+        lambda m: f"{_number_to_words(m.group(1))} {' '.join(m.group(2))}",
         text,
     )
 
 
 # ---------------------------------------------------------------------------
-# Decimal numbers
-#
-# Do NOT convert all integers to words.
-#
-# Pocket TTS is much better at:
-#
-# "I have 5 tasks."
-#
-# than:
-#
-# "I have five tasks."
-#
-# So ordinary numbers are left alone.
+# Everything else
 # ---------------------------------------------------------------------------
 
-_DECIMAL = re.compile(
-    r"(?<![\w.])-?\d+\.\d+(?![\w.])"
-)
+_GENERIC_NUMBER = re.compile(r"(?<![\w.])(-?" + _NUM + r")(?!\w)")
 
 
-def _replace_decimal_numbers(
-    text: str,
-) -> str:
+def _replace_remaining_numbers(text: str) -> str:
+    return _GENERIC_NUMBER.sub(lambda m: _number_to_words(m.group(1)), text)
 
-    def replace(match: re.Match[str]) -> str:
 
-        value = match.group(0)
-
-        if value.startswith("-"):
-            value = "minus " + value[1:]
-
-        return value
-
-    return _DECIMAL.sub(
-        replace,
-        text,
-    )
+def _replace_symbols(text: str) -> str:
+    text = re.sub(r"#\s?(?=\d)", "number ", text)
+    text = re.sub(r"~\s?(?=\d)", "about ", text)
+    text = text.replace("×", " times ")
+    text = text.replace("&", " and ")
+    return text
 
 
 # ---------------------------------------------------------------------------
@@ -821,29 +1104,45 @@ def _normalize_speech(
         return ""
 
     text = _clean_markdown(text)
+    text = text.replace("−", "-")
 
     # Structured things first.
     text = _replace_emails(text)
     text = _replace_urls(text)
     text = _replace_security_codes(text)
-
-    # Tech names.
-    text = _split_tech_names(text)
-
-    # Only known problematic acronym pronunciations.
     text = _replace_acronyms(text)
 
-    # Small targeted fixes.
-    text = _replace_times(text)
-    text = _replace_percentages(text)
-    text = _replace_decimal_numbers(text)
+    # Dates and times (before anything touches ':' or '-').
+    text = _replace_iso_dates(text)
+    text = _replace_times_12(text)
+    text = _replace_times_24(text)
+    text = _replace_years(text)
 
-    # Normalize whitespace.
-    text = re.sub(
-        r"\s+",
-        " ",
-        text,
-    ).strip()
+    # Quantities.
+    text = _replace_currency(text)
+    text = _replace_percentages(text)
+    text = _replace_ranges(text)
+    text = _replace_temperatures(text)
+    text = _replace_units(text)
+    text = _replace_bare_units(text)
+
+    # Names and identifiers.
+    text = _replace_ordinals(text)
+    text = _replace_versions(text)
+    text = _replace_dotted_numbers(text)
+    text = _replace_resolutions(text)
+    text = _replace_model_names(text)
+    text = _replace_digit_caps(text)
+
+    # Whatever numbers are left.
+    text = _replace_symbols(text)
+    text = _replace_remaining_numbers(text)
+
+    # Last, so "USB3" -> "USB three" -> "U S B three".
+    text = text.replace("_", " ")
+    text = _replace_spelled_acronyms(text)
+
+    text = re.sub(r"\s+", " ", text).strip()
 
     return text
 
@@ -1801,55 +2100,537 @@ def generate_voice_file(
 # ============================================================================
 # TESTS
 # ============================================================================
+#
+#   python tts.py --test-normalization   assertion tests, no model/audio needed
+#   python tts.py --test-pipeline        full speak/stop/WAV flow with a FAKE
+#                                        model and FAKE audio device
+#   python tts.py --test-all             both of the above (exit code 1 on fail)
+#   python tts.py --test                 real model + real speakers (by ear)
+#
+# --test-normalization and --test-pipeline are deterministic and safe to run in
+# CI. Only --test needs Pocket TTS weights and an audio device.
 
-def _test_normalization() -> None:
+# (input, expected spoken text)
+_NORMALIZATION_CASES: list[tuple[str, str]] = [
+    # --- clock times -------------------------------------------------------
+    ("It's 22:35 right now", "It's ten thirty five P M right now"),
+    ("The time is 22:35.", "The time is ten thirty five P M."),
+    ("Alarm at 07:05", "Alarm at seven oh five A M"),
+    ("Sunset is at 18:05", "Sunset is at six oh five P M"),
+    ("23:59", "eleven fifty nine P M"),
+    ("00:00", "midnight"),
+    ("12:00", "noon"),
+    ("00:15", "twelve fifteen A M"),
+    ("at 1:30", "at one thirty"),
+    ("Meeting at 10:30 PM", "Meeting at ten thirty P M"),
+    ("at 9 AM", "at nine A M"),
+    ("at 10:05 a.m.", "at ten oh five A M"),
 
-    tests = [
-        "ThinkPad T480",
-        "RTX4090 GPU",
-        "iPhone15",
-        "USB3",
-        "5G",
-        "2FA",
-        "CPU and GPU",
-        "27 degrees Celsius",
-        "99.5%",
-        "3.14",
-        "https://example.com/api/v1",
-        "zoe@example.com",
-        "security code 4413796",
-        "10:30 PM",
-        "192.168.0.101",
-    ]
+    # --- speed / units -----------------------------------------------------
+    ("Wind is 27 kph", "Wind is twenty seven kilometers per hour"),
+    ("Wind is 27kph", "Wind is twenty seven kilometers per hour"),
+    ("Top speed 120 km/h", "Top speed one hundred twenty kilometers per hour"),
+    ("Going 60 mph", "Going sixty miles per hour"),
+    ("1 kph", "one kilometer per hour"),
+    ("What is that in kph?", "What is that in kilometers per hour?"),
+    ("Download speed 50 Mbps", "Download speed fifty megabits per second"),
+    ("16 GB of RAM", "sixteen gigabytes of R A M"),
+    ("3.2 GHz", "three point two gigahertz"),
+    ("5000 mAh", "five thousand milliamp hours"),
+    ("It took 5m and 10s", "It took five meters and ten seconds"),
+    ("10-20 minutes", "ten to twenty minutes"),
+
+    # --- temperature / percent --------------------------------------------
+    ("It is 27°C outside", "It is twenty seven degrees Celsius outside"),
+    ("Temperature is 27.5°C.", "Temperature is twenty seven point five degrees Celsius."),
+    ("-3.5 °F", "minus three point five degrees Fahrenheit"),
+    ("Battery is at 87%.", "Battery is at eighty seven percent."),
+    ("99.5%", "ninety nine point five percent"),
+
+    # --- plain numbers -----------------------------------------------------
+    ("I have 5 tasks and 22 35", "I have five tasks and twenty two thirty five"),
+    ("1,234,567 views", "one million two hundred thirty four thousand five hundred sixty seven views"),
+    ("3.14", "three point one four"),
+    ("-5", "minus five"),
+    ("Score 3-2", "Score three to two"),
+    ("Call 01712345678", "Call zero one seven one two three four five six seven eight"),
+    ("security code 4413796", "security code four four one three seven nine six"),
+    ("the 22nd and 1st", "the twenty second and first"),
+    ("Meeting on the 3rd", "Meeting on the third"),
+
+    # --- money -------------------------------------------------------------
+    ("$5.50", "five dollars and fifty cents"),
+    ("$1", "one dollar"),
+    ("৳500", "five hundred taka"),
+    ("Tk 1,250", "one thousand two hundred fifty taka"),
+    ("$2.5 million", "two point five million dollars"),
+
+    # --- dates -------------------------------------------------------------
+    ("2026-10-04", "October fourth, twenty twenty six"),
+    ("October 4, 2026", "October four, twenty twenty six"),
+    ("in 2026", "in twenty twenty six"),
+
+    # --- tech names --------------------------------------------------------
+    ("ThinkPad T480", "ThinkPad T four eighty"),
+    ("RTX4090 GPU", "R T X forty ninety G P U"),
+    ("iPhone15", "iPhone fifteen"),
+    ("USB3", "U S B three"),
+    ("5G network", "five G network"),
+    ("4K 1080p", "four K ten eighty p"),
+    ("Enable 2FA", "Enable two factor authentication"),
+    ("version v2.5.1", "version version two point five point one"),
+    ("192.168.0.101", "one nine two dot one six eight dot zero dot one zero one"),
+
+    # --- web / markup ------------------------------------------------------
+    ("https://example.com/api/v1", "example dot com slash A P I slash version one"),
+    ("zoe@example.com", "Zoe at example dot com"),
+    ("**Bold** and `code` and [link](http://x.com)", "Bold and code and link"),
+    ("snake_case_word", "snake case word"),
+    ("ZOE is online", "Zoe is online"),
+
+    # --- spelled-out acronyms ----------------------------------------------
+    ("api", "A P I"),
+    ("The API returned an error", "The A P I returned an error"),
+    ("Two APIs are down", "Two A P Is are down"),
+    ("REST api v2", "REST A P I version two"),
+    ("ZOE API", "Zoe A P I"),
+    ("CPU and GPU", "C P U and G P U"),
+    ("JSON over HTTPS", "J S O N over H T T P S"),
+    ("SSH into the Raspberry Pi", "S S H into the Raspberry Pi"),
+    ("wifi is down", "Wi Fi is down"),
+    ("Check the ID on the TV", "Check the I D on the T V"),
+    ("snake_case_api", "snake case A P I"),
+    # capitals-only acronyms must not touch ordinary words
+    ("I said id and tv and os", "I said id and tv and os"),
+    ("The OS is fast", "The O S is fast"),
+    ("rapidly capital", "rapidly capital"),
+
+    # --- should be left alone ----------------------------------------------
+    ("No digits here at all.", "No digits here at all."),
+    ("", ""),
+]
+
+# Inputs where NO digit may survive normalization.
+_NO_DIGIT_SAMPLES = [
+    "Wind 27 kph, 22:35, 99.5%, $5.50, 5G, T480, RTX4090, 2026-10-04.",
+    "Order 1042 shipped on the 3rd, arriving 14:20 with 3 items for Tk 1,250.",
+    "Room 22 is 21.5°C, humidity 61%, battery 87%, 3 lights on.",
+]
+
+
+def _report(results: list[tuple[str, bool, str]]) -> bool:
+
+    failed = [r for r in results if not r[1]]
+
+    for name, ok, detail in results:
+        if not ok:
+            print(f"  FAIL  {name}")
+            if detail:
+                for line in detail.splitlines():
+                    print(f"        {line}")
+
+    print(
+        f"  {len(results) - len(failed)}/{len(results)} passed"
+    )
+
+    return not failed
+
+
+def _test_normalization() -> bool:
+    """Assertion-based tests for the speech normalizer."""
 
     print()
     print("=" * 72)
-    print("ZOE TTS NORMALIZATION")
+    print("ZOE TTS NORMALIZATION TESTS")
     print("=" * 72)
 
-    for value in tests:
+    results: list[tuple[str, bool, str]] = []
 
-        print()
-        print("INPUT : ", value)
-        print(
-            "OUTPUT:",
-            _normalize_speech(value),
+    # 1. Exact expected output.
+    for raw, expected in _NORMALIZATION_CASES:
+
+        actual = _normalize_speech(raw)
+
+        results.append(
+            (
+                f"{raw!r}",
+                actual == expected,
+                f"expected: {expected!r}\nactual  : {actual!r}",
+            )
         )
 
+    # 2. No raw digits may reach the TTS model.
+    for sample in _NO_DIGIT_SAMPLES:
+
+        actual = _normalize_speech(sample)
+
+        results.append(
+            (
+                f"no digits left: {sample!r}",
+                not re.search(r"\d", actual),
+                f"actual: {actual!r}",
+            )
+        )
+
+    # 3. Normalizing twice must not change anything (idempotent).
+    for raw, _ in _NORMALIZATION_CASES:
+
+        once = _normalize_speech(raw)
+        twice = _normalize_speech(once)
+
+        results.append(
+            (
+                f"idempotent: {raw!r}",
+                once == twice,
+                f"once : {once!r}\ntwice: {twice!r}",
+            )
+        )
+
+    # 4. Chunking works on normalized text and respects the length limit.
+    long_text = " ".join(
+        f"Sentence {i} reports {20 + i} kph wind at 22:{i:02d}."
+        for i in range(30)
+    )
+
+    chunks = _split_sentences(long_text)
+
+    results.append(
+        (
+            "chunking: produces chunks",
+            len(chunks) == 30,
+            f"got {len(chunks)} chunks",
+        )
+    )
+
+    results.append(
+        (
+            "chunking: chunks within limit",
+            all(len(c) <= MAX_CHUNK_LENGTH for c in chunks),
+            "",
+        )
+    )
+
+    results.append(
+        (
+            "chunking: no digits in chunks",
+            not any(re.search(r"\d", c) for c in chunks),
+            "",
+        )
+    )
+
+    run_on = " ".join(["word"] * 400)
+
+    run_on_chunks = _split_sentences(run_on)
+
+    results.append(
+        (
+            "chunking: splits run-on text",
+            len(run_on_chunks) > 1
+            and all(len(c) <= MAX_CHUNK_LENGTH for c in run_on_chunks),
+            f"got {len(run_on_chunks)} chunks",
+        )
+    )
+
+    ok = _report(results)
+
+    print("=" * 72)
+
+    return ok
+
+
+def _test_pipeline() -> bool:
+    """
+    End-to-end test of speak / stop / callbacks / WAV output.
+
+    Uses a FAKE Pocket TTS model and a FAKE sounddevice stream, so it needs
+    no model weights and no audio hardware.
+    """
+
+    global _tts
+    global _voice_state
+
     print()
     print("=" * 72)
+    print("ZOE TTS PIPELINE TESTS (fake model, fake audio device)")
+    print("=" * 72)
+
+    class FakeModel:
+
+        def __init__(self) -> None:
+            self.texts: list[str] = []
+            self.lock = threading.Lock()
+
+        def generate_audio_stream(
+            self,
+            model_state,
+            text_to_generate,
+            copy_state=True,
+        ):
+            with self.lock:
+                self.texts.append(text_to_generate)
+
+            for _ in range(2):
+                yield np.full(2_400, 0.1, dtype=np.float32)
+
+    class FakeStream:
+
+        instances: list["FakeStream"] = []
+
+        def __init__(self, **kwargs) -> None:
+            self.kwargs = kwargs
+            self.active = False
+            self.frames = 0
+            FakeStream.instances.append(self)
+
+        def start(self) -> None:
+            self.active = True
+
+        def write(self, data) -> None:
+            self.frames += len(data)
+            time.sleep(0.001)
+
+        def abort(self) -> None:
+            self.active = False
+
+        def close(self) -> None:
+            self.active = False
+
+    results: list[tuple[str, bool, str]] = []
+
+    saved_model = _tts
+    saved_voice = _voice_state
+    saved_stream_cls = sd.OutputStream
+
+    fake = FakeModel()
+
+    _tts = fake  # type: ignore[assignment]
+    _voice_state = object()
+    sd.OutputStream = FakeStream  # type: ignore[assignment]
+
+    wav_path: str | None = None
+
+    try:
+
+        stop()
+        _stop_audio_stream()
+
+        # 1. Blocking speak plays to completion with normalized text.
+        done = threading.Event()
+
+        success = speak(
+            "The time is 22:35. Wind is 27 kph.",
+            on_complete=done.set,
+        )
+
+        spoken = " ".join(fake.texts)
+
+        results.append(("speak() returns True", success, ""))
+
+        results.append(
+            (
+                "model received 'ten thirty five P M'",
+                "ten thirty five P M" in spoken,
+                f"model text: {spoken!r}",
+            )
+        )
+
+        results.append(
+            (
+                "model received 'kilometers per hour'",
+                "kilometers per hour" in spoken,
+                f"model text: {spoken!r}",
+            )
+        )
+
+        results.append(
+            (
+                "model never saw a digit",
+                not re.search(r"\d", spoken),
+                f"model text: {spoken!r}",
+            )
+        )
+
+        results.append(
+            (
+                "on_complete fired",
+                done.wait(timeout=2.0),
+                "",
+            )
+        )
+
+        results.append(
+            (
+                "audio reached the output device",
+                sum(s.frames for s in FakeStream.instances) > 0,
+                "",
+            )
+        )
+
+        results.append(
+            (
+                "is_speaking() is False afterwards",
+                not is_speaking(),
+                "",
+            )
+        )
+
+        status = get_status()
+
+        results.append(
+            (
+                "status: playback_finished, no failure",
+                bool(status["playback_finished"])
+                and not status["generation_failed"],
+                f"status: {status}",
+            )
+        )
+
+        # 2. Empty / whitespace text is rejected cleanly.
+        results.append(("speak('') returns False", speak("") is False, ""))
+        results.append(("speak('   ') returns False", speak("   ") is False, ""))
+
+        # 3. Interrupting with stop(), then speaking again, still works.
+        long_id = speak_async(
+            " ".join(
+                f"This is long sentence number {i}."
+                for i in range(40)
+            )
+        )
+
+        results.append(
+            (
+                "long reply (40 sentences) is accepted",
+                long_id is not None,
+                f"speak_async returned {long_id}",
+            )
+        )
+
+        time.sleep(0.05)
+
+        stop()
+
+        results.append(
+            (
+                "stop() clears speaking state",
+                not is_speaking(),
+                "",
+            )
+        )
+
+        results.append(
+            (
+                "stop() empties queues",
+                _audio_queue.empty() and _generation_queue.empty(),
+                "",
+            )
+        )
+
+        results.append(
+            (
+                "speak() works again after stop()",
+                speak("Back online.") is True,
+                "",
+            )
+        )
+
+        # 4. A new utterance replaces one that is still playing.
+        first = speak_async(
+            " ".join(
+                f"Old utterance sentence {i}."
+                for i in range(40)
+            )
+        )
+
+        second = speak_async("Newer utterance.")
+
+        old_state = _get_state(first) if first is not None else None
+
+        results.append(
+            (
+                "new speech supersedes old speech",
+                first is not None
+                and second is not None
+                and second > first
+                and old_state is None,
+                f"first={first} second={second}",
+            )
+        )
+
+        if second is not None:
+            new_state = _get_state(second)
+            if new_state is not None:
+                new_state.speech_complete_event.wait(timeout=3.0)
+
+        # 5. WAV file generation.
+        wav_path = generate_voice_file(
+            "Wind is 27 kph at 22:35."
+        )
+
+        wav_ok = False
+        wav_detail = f"path: {wav_path!r}"
+
+        if wav_path and os.path.exists(wav_path):
+
+            with wave.open(wav_path, "rb") as wav:
+
+                wav_ok = (
+                    wav.getnchannels() == 1
+                    and wav.getsampwidth() == 2
+                    and wav.getframerate() == SAMPLE_RATE
+                    and wav.getnframes() > 0
+                )
+
+                wav_detail = (
+                    f"channels={wav.getnchannels()} "
+                    f"width={wav.getsampwidth()} "
+                    f"rate={wav.getframerate()} "
+                    f"frames={wav.getnframes()}"
+                )
+
+        results.append(("generate_voice_file() writes valid WAV", wav_ok, wav_detail))
+
+        results.append(
+            (
+                "generate_voice_file('') returns None",
+                generate_voice_file("") is None,
+                "",
+            )
+        )
+
+    finally:
+
+        stop()
+        _stop_audio_stream()
+
+        sd.OutputStream = saved_stream_cls  # type: ignore[assignment]
+        _tts = saved_model
+        _voice_state = saved_voice
+
+        if wav_path:
+            try:
+                os.remove(wav_path)
+            except OSError:
+                pass
+
+    ok = _report(results)
+
+    print("=" * 72)
+
+    return ok
 
 
 def _test() -> None:
+    """Real model + real speakers. Judge by ear."""
 
     text = (
         "Hello Sir. "
         "This is the ZOE Pocket TTS production test. "
-        "The CPU and GPU should sound natural. "
+        "The current time is 22:35, and the wind is 27 kph. "
+        "It is 27 degrees Celsius outside, with 99.5% humidity. "
+        "The API call finished, and the CPU and GPU are idle. "
         "The ThinkPad T480 is being tested with an RTX4090 GPU. "
         "The iPhone15 is another example. "
-        "USB3 is also being tested. "
-        "The current temperature is 27 degrees Celsius. "
+        "Your meeting is at 10:30 PM on October 4th. "
         "The server is available at "
         "https://example.com/api/v1. "
         "The email is zoe@example.com. "
@@ -1882,7 +2663,7 @@ def _test() -> None:
 # CLI
 # ============================================================================
 
-def _main() -> None:
+def _main() -> int:
 
     parser = argparse.ArgumentParser(
         description="ZOE Pocket TTS"
@@ -1891,22 +2672,47 @@ def _main() -> None:
     parser.add_argument(
         "--test",
         action="store_true",
-        help="Run TTS playback test.",
+        help="Real model + real speakers (listen by ear).",
     )
 
     parser.add_argument(
         "--test-normalization",
         action="store_true",
-        help="Run normalization test.",
+        help="Assertion tests for text normalization (no model/audio).",
+    )
+
+    parser.add_argument(
+        "--test-pipeline",
+        action="store_true",
+        help="Speak/stop/WAV tests with a fake model and fake audio.",
+    )
+
+    parser.add_argument(
+        "--test-all",
+        action="store_true",
+        help="Run normalization + pipeline tests.",
     )
 
     args = parser.parse_args()
 
-    if args.test_normalization:
-        _test_normalization()
-        return
+    ran_any = False
+    ok = True
+
+    if args.test_normalization or args.test_all:
+        ran_any = True
+        ok = _test_normalization() and ok
+
+    if args.test_pipeline or args.test_all:
+        ran_any = True
+        ok = _test_pipeline() and ok
+
+    if ran_any:
+        print()
+        print("ALL TESTS PASSED" if ok else "SOME TESTS FAILED")
+        return 0 if ok else 1
 
     _test()
+    return 0
 
 
 # ============================================================================
@@ -1918,8 +2724,10 @@ atexit.register(shutdown)
 
 if __name__ == "__main__":
 
+    exit_code = 0
+
     try:
-        _main()
+        exit_code = _main()
 
     except KeyboardInterrupt:
 
@@ -1930,3 +2738,5 @@ if __name__ == "__main__":
     finally:
 
         shutdown()
+
+    sys.exit(exit_code)

@@ -14,7 +14,7 @@ from backend.brain.main import (
     create_zoe_brain,
 )
 
-from backend.context.agents import (
+from backend.brain.agents import (
     AGENTS,
     execute_agent,
 )

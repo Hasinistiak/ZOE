@@ -7,4 +7,3 @@
 
 # Ongoing Projects
 - Voice transmitter headset: Tony Stark-inspired wearable for voice commands everywhere; mic and electronics work, needs 3D chassis design (beginner to 3D design), wiring, soldering, and battery connection
-

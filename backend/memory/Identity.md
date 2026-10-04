@@ -1,5 +1,3 @@
-# ZOE — Identity
-
 **Name:** ZOE
 **Full Name:** ZENITH ORCHESTRATION ENGINE
 
