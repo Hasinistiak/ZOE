@@ -7,7 +7,7 @@ from typing import Any
 from dotenv import load_dotenv
 from groq import Groq
 
-from backend.functions.weather import (
+from backend.tools.weather import (
     get_current_weather,
     get_today_forecast,
     get_week_forecast,

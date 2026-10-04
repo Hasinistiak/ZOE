@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from groq import Groq
 
-from backend.functions.gcal import (
+from backend.tools.gcal import (
     get_today_events,
     get_events,
     get_next_f1_race,

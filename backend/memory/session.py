@@ -11,7 +11,6 @@ from backend.memory.chatlog import (
     add_message,
     close_chatlog,
     save_chatlog,
-    submit_for_memory,
 )
 
 
@@ -26,6 +25,7 @@ SESSION_TIMEOUT_SECONDS = 30 * 60
 # SESSION MANAGER
 # ============================================================
 
+
 class SessionManager:
     """
     Manages ZOE's active conversational session.
@@ -37,7 +37,8 @@ class SessionManager:
 
     It does NOT contain:
 
-        - long-term memory retrievals
+        - long-term memory
+        - memory retrievals
         - memory-gate decisions
         - agent/tool results
         - runtime command results
@@ -47,10 +48,9 @@ class SessionManager:
         - execution metadata
         - background notifications
 
-    Background/proactive notifications must use
-    add_notification() and are deliberately excluded from
-    conversational session history and conversational memory
-    submission.
+    Background/proactive notifications are handled separately
+    through add_notification() and are deliberately excluded
+    from conversational session history.
     """
 
     def __init__(
@@ -68,9 +68,6 @@ class SessionManager:
 
         self._lock = threading.RLock()
 
-        # The user message awaiting its conversational
-        # assistant response.
-        self._pending_user_message: str | None = None
 
     # ========================================================
     # SESSION
@@ -95,8 +92,6 @@ class SessionManager:
 
         self._last_activity = time.monotonic()
 
-        self._pending_user_message = None
-
         save_chatlog(
             self._session
         )
@@ -105,6 +100,7 @@ class SessionManager:
             "[ZOE SESSION] New session: "
             f"{session_id[:8]}"
         )
+
 
     # ========================================================
     # EXPIRATION
@@ -121,6 +117,7 @@ class SessionManager:
         )
 
         return elapsed >= self.timeout_seconds
+
 
     # ========================================================
     # GET SESSION
@@ -146,6 +143,7 @@ class SessionManager:
 
             return self._session
 
+
     # ========================================================
     # USER MESSAGE
     # ========================================================
@@ -155,11 +153,8 @@ class SessionManager:
         content: str,
     ) -> None:
         """
-        Add a genuine user conversational message.
-
-        This message becomes the pending user turn that will
-        later be paired with ZOE's conversational response
-        for memory submission.
+        Add a genuine user conversational message
+        to the current session history.
         """
 
         content = str(
@@ -178,10 +173,8 @@ class SessionManager:
         )
 
         with self._lock:
-
-            self._pending_user_message = content
-
             self._last_activity = time.monotonic()
+
 
     # ========================================================
     # ASSISTANT MESSAGE
@@ -192,13 +185,8 @@ class SessionManager:
         content: str,
     ) -> None:
         """
-        Add a genuine conversational ZOE reply.
-
-        Only this type of assistant output becomes part of
-        conversational session history.
-
-        The completed user/assistant pair is submitted to
-        MemoryManager.
+        Add a genuine conversational ZOE reply
+        to the current session history.
         """
 
         content = str(
@@ -217,23 +205,8 @@ class SessionManager:
         )
 
         with self._lock:
-
-            user_message = (
-                self._pending_user_message
-            )
-
-            self._pending_user_message = None
-
             self._last_activity = time.monotonic()
 
-        # Submit ONLY an actual conversational turn.
-        if user_message:
-
-            submit_for_memory(
-                chatlog=session,
-                user_content=user_message,
-                assistant_content=content,
-            )
 
     # ========================================================
     # BACKGROUND NOTIFICATION
@@ -250,10 +223,10 @@ class SessionManager:
 
             - enter session history
             - become assistant messages
-            - get paired with a pending user message
-            - get submitted to conversational memory
+            - modify conversational context
+            - modify the session timeout
 
-        The runtime/UI/TTS layer is responsible for actually
+        The runtime/UI/TTS layer is responsible for
         delivering the notification.
         """
 
@@ -266,12 +239,10 @@ class SessionManager:
 
         with self._lock:
 
-            # Notification activity should not mutate the
-            # conversational session timeout.
-            #
-            # A background reminder should not keep a
-            # conversational session alive indefinitely.
+            # Background notifications must not keep
+            # a conversational session alive indefinitely.
             pass
+
 
     # ========================================================
     # RECENT SESSION
@@ -301,9 +272,9 @@ class SessionManager:
         # Defensive filtering:
         #
         # Session context is strictly conversational.
-        # Even if another caller accidentally inserts an
-        # unsupported role into the chatlog, it must not
-        # escape through this API.
+        # Only user and assistant messages may escape
+        # through this API.
+
         conversational_messages: list[
             dict[str, Any]
         ] = []
@@ -353,6 +324,7 @@ class SessionManager:
 
         return conversational_messages[-limit:]
 
+
     # ========================================================
     # CONTEXT
     # ========================================================
@@ -398,15 +370,12 @@ class SessionManager:
                 continue
 
             if role == "user":
-
                 prefix = "User"
 
             elif role == "assistant":
-
                 prefix = "ZOE"
 
             else:
-
                 continue
 
             lines.append(
@@ -414,6 +383,7 @@ class SessionManager:
             )
 
         return "\n".join(lines)
+
 
     # ========================================================
     # NEW SESSION
@@ -427,6 +397,7 @@ class SessionManager:
                 self.close()
 
             self._new_session()
+
 
     # ========================================================
     # CLOSE
@@ -451,7 +422,6 @@ class SessionManager:
 
                 self._last_activity = 0.0
 
-                self._pending_user_message = None
 
     # ========================================================
     # INFO
@@ -472,6 +442,7 @@ class SessionManager:
             return self._session.get(
                 "session_id"
             )
+
 
     # ========================================================
     # ACTIVE

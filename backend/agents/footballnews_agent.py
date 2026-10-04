@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from backend.functions.news import get_football_news
+from backend.tools.news import get_football_news
 
 
 # ============================================================

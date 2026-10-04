@@ -10,7 +10,7 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 from groq import Groq
 
-from backend.functions.reminder import (
+from backend.tools.reminder import (
     create_reminder,
     delete_reminder,
     get_reminders,

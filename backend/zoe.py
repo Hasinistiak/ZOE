@@ -92,7 +92,7 @@ RUNTIME_RESPONSE_TIMEOUT = max(
 
 print()
 print("=" * 60)
-print("                     ZOE MARK 33")
+print("                     ZOE MARK 34")
 print("=" * 60)
 print()
 
@@ -2129,7 +2129,7 @@ def main() -> None:
         print()
         print("=" * 60)
         print(
-            "                    ZOE MARK 33 ONLINE"
+            "                    ZOE MARK 34 ONLINE"
         )
         print("=" * 60)
         print()

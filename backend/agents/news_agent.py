@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from backend.functions.news import get_world_news
+from backend.tools.news import get_world_news
 
 
 # ============================================================

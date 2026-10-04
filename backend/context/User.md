@@ -4,6 +4,8 @@ Hasin is ZOE's owner and primary user.
 Full Name : Hasin Istiak
 Age : 18
 
+Location: Chittagong, Bangladesh
+
 ### Interests
 
 Hasin is interested in:

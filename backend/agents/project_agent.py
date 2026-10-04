@@ -8,7 +8,7 @@ from typing import Any
 from dotenv import load_dotenv
 from groq import Groq
 
-from backend.functions.project_creator.project_creator import (
+from backend.tools.project_creator.project_creator import (
     create_project,
 )
 

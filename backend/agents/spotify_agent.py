@@ -1,20 +1,28 @@
 from __future__ import annotations
 
+import json
 import os
-from typing import Any, Optional
+import re
+import traceback
+from typing import Any, Callable, Optional
 
 from dotenv import load_dotenv
 from groq import Groq
 
-from backend.functions.spotify import (
+from backend.tools.spotify import (
+    PLAYLISTS,
+    get_configured_playlists,
     get_current_song,
     get_devices,
-    get_playlists,
     normalize_text,
     spotify_next,
-    spotify_play,
-    spotify_play_pause,
+    spotify_pause,
+    spotify_play_album,
+    spotify_play_artist,
+    spotify_play_playlist,
+    spotify_play_track,
     spotify_previous,
+    spotify_resume,
     spotify_search,
 )
 
@@ -30,25 +38,40 @@ MODEL = os.getenv(
     "openai/gpt-oss-120b",
 )
 
-GROQ_API_KEY = os.getenv(
-    "GROQ_API_KEY1"
-)
+GROQ_API_KEY = os.getenv("GROQ_API_KEY1")
 
-if not GROQ_API_KEY:
-    raise RuntimeError(
-        "GROQ_API_KEY1 is not configured."
-    )
+# Created lazily. Raising at import time means a missing key kills
+# whatever imports this module, and pause/next/etc. don't need Groq.
+_client: Optional[Groq] = None
 
-client = Groq(
-    api_key=GROQ_API_KEY,
-)
+
+def _get_client() -> Groq:
+    global _client
+
+    if _client is None:
+        if not GROQ_API_KEY:
+            raise RuntimeError("GROQ_API_KEY1 is not configured.")
+
+        _client = Groq(api_key=GROQ_API_KEY)
+
+    return _client
 
 
 # ============================================================
 # SYSTEM PROMPT
+#
+# Built dynamically so the numbered playlists always match
+# PLAYLISTS in spotify.py. spotify.py expects the router to
+# choose the playlist NUMBER; this prompt is what makes that work.
 # ============================================================
 
-SYSTEM_PROMPT = """
+def _build_system_prompt() -> str:
+    playlist_lines = "\n".join(
+        f"    {p['number']}. {p['name']}"
+        for p in get_configured_playlists()
+    )
+
+    return f"""
 You are ZOE's Spotify command router.
 
 Your ONLY task is to choose exactly ONE Spotify function.
@@ -58,102 +81,89 @@ Never explain.
 Never perform the Spotify action yourself.
 Never invent music information.
 
+CONFIGURED PLAYLISTS (use these numbers with spotify_play_playlist):
+{playlist_lines}
+
 FUNCTIONS:
 
-spotify_play(query)
-    Play a song, artist, album, or playlist.
+spotify_play_playlist(number)
+    Play one of the configured playlists above, by number.
+
+spotify_play_track(name, artist?)
+    Play a single song.
+
+spotify_play_artist(name)
+    Play an artist.
+
+spotify_play_album(name, artist?)
+    Play an album.
+
+spotify_search(query, search_type?)
+    Search Spotify without playing. search_type is one of
+    track, artist, album, playlist (default track).
 
 spotify_pause()
-    Pause playback.
-
 spotify_resume()
-    Resume playback.
-
 spotify_next()
-    Skip to the next track.
-
 spotify_previous()
-    Go to the previous track.
-
 spotify_current()
-    Return the currently playing track.
-
-spotify_search(query)
-    Search Spotify without playing anything.
+    Playback controls / what is playing.
 
 spotify_playlists()
-    Return the user's playlists.
+    List the configured playlists.
 
 spotify_devices()
-    Return available Spotify devices.
+    List available Spotify devices.
 
 RULES:
 
 1. Always call exactly ONE function.
 
-2. For play requests, preserve the user's actual
-   music query. Do not rewrite song titles.
+2. If the user names a configured playlist (by name, by number,
+   or as "my <name> playlist"), call spotify_play_playlist with
+   that playlist's number. Only use numbers listed above. (Olivia Rodrigo => Just OR, Arctic Monkeys => Just AM, Tony Stark/Ironamn => Even dead I am the hero, spiderman/Peter Parker => Property of Peter Parker)
 
-3. "play X" means spotify_play(query="X").
+3. "play X by Y" means spotify_play_track(name="X", artist="Y").
+   Do not rewrite or "fix" song titles. Titles may contain the
+   word "by" (e.g. "Stand by Me"); use judgement.
 
-4. "play X by Y" must preserve the entire phrase:
-   "X by Y".
+4. If the user gives only an artist name, call spotify_play_artist.
+   If it is not clearly an artist, treat it as a song title.
 
-5. "search X" or "find X" means spotify_search.
+5. Use spotify_play_album only when the user says "album".
 
-6. "what is playing", "what's playing",
-   "current song", "what song is this"
+6. Do not treat an artist name as a playlist unless the user says
+   "playlist" or it matches a configured playlist name.
+
+7. "search X" / "find X" means spotify_search.
+
+8. "what's playing", "current song", "what song is this"
    means spotify_current.
 
-7. "pause", "stop" means spotify_pause.
+9. "pause", "stop" means spotify_pause.
+   "resume", "continue" means spotify_resume.
+   "next", "skip" means spotify_next.
+   "previous", "back" means spotify_previous.
 
-8. "resume", "continue" means spotify_resume.
-
-9. "next", "skip", "next song" means spotify_next.
-
-10. "previous", "back", "previous song"
-    means spotify_previous.
-
-11. "my playlists", "show my playlists",
-    "show playlists" means spotify_playlists.
-
-12. "devices", "spotify devices",
-    "available devices" means spotify_devices.
-
-13. Do not interpret an artist name as a playlist
-    unless the user explicitly says playlist.
+10. "my playlists", "show playlists" means spotify_playlists.
+    "devices", "spotify devices" means spotify_devices.
 
 Examples:
 
 User: play Do I Wanna Know by Arctic Monkeys
--> spotify_play("Do I Wanna Know by Arctic Monkeys")
+-> spotify_play_track(name="Do I Wanna Know", artist="Arctic Monkeys")
 
 User: play Olivia Rodrigo
--> spotify_play("Olivia Rodrigo")
+-> spotify_play_artist(name="Olivia Rodrigo")
 
-User: play my Olivia Rodrigo playlist
--> spotify_play("my Olivia Rodrigo playlist")
+User: play the album AM by Arctic Monkeys
+-> spotify_play_album(name="AM", artist="Arctic Monkeys")
 
-User: play Just OR
--> spotify_play("Just OR")
+User: play playlist 2
+-> spotify_play_playlist(number=2)
 
-User: play number two
--> spotify_play("number two")
-
-User: search Arctic Monkeys
--> spotify_search("Arctic Monkeys")
-
-User: what song is playing
--> spotify_current()
-
-User: pause
--> spotify_pause()
-
-User: continue
--> spotify_resume()
-
-User: skip this
--> spotify_next()
+User: search Arctic Monkeys artist
+-> spotify_search(query="Arctic Monkeys", search_type="artist")
 """
 
 
@@ -165,27 +175,19 @@ def _base_result(
     ok: bool,
     action: str,
     *,
-    message: str | None = None,
+    message: str,
     data: Any = None,
     error: str | None = None,
 ) -> dict[str, Any]:
     """
-    Internal result contract.
-
-    The result is structured for ZOE's runtime/Brain.
-
-    IMPORTANT:
-    This dictionary is NOT intended to be shown directly
-    to the user. The user-facing response is `message`.
+    Internal result contract for ZOE's runtime.
+    `message` is the user-facing text.
     """
-
     result: dict[str, Any] = {
         "ok": ok,
         "action": action,
+        "message": message,
     }
-
-    if message is not None:
-        result["message"] = message
 
     if data is not None:
         result["data"] = data
@@ -196,1411 +198,356 @@ def _base_result(
     return result
 
 
-def _success(
-    action: str,
-    result: Any = None,
-) -> dict[str, Any]:
-    """
-    Convert a raw Spotify result into the normalized
-    internal Spotify response.
-    """
-
-    data = _normalize_result(
-        action,
-        result,
-    )
-
-    message = _build_message(
-        action,
-        data,
-    )
-
+def _success(action: str, raw: Any) -> dict[str, Any]:
     return _base_result(
         True,
         action,
-        message=message,
-        data=data,
+        message=_build_message(action, raw),
+        data=raw,
     )
 
 
-def _failure(
-    action: str,
-    error: str,
-) -> dict[str, Any]:
+def _failure(action: str, error: str) -> dict[str, Any]:
+    # spotify.py already returns user-readable error strings
+    # (see _clean_error), so surface them as-is.
+    error = str(error).strip() or f"Spotify couldn't {action}."
+
     return _base_result(
         False,
         action,
-        error=str(error),
-        message=f"Spotify couldn't {action}.",
+        message=error,
+        error=error,
     )
 
 
-# ============================================================
-# RESULT NORMALIZATION
-# ============================================================
-
-def _normalize_result(
+def _run(
     action: str,
-    result: Any,
+    fn: Callable[..., Any],
+    **kwargs: Any,
 ) -> dict[str, Any]:
     """
-    Normalize different Spotify function responses into
-    one predictable internal format.
+    Call a spotify.py function and normalize the outcome.
+
+    spotify.py has two failure styles:
+      - playback functions RETURN {"success": False, "error": ...}
+      - search/devices/current RAISE RuntimeError
+    Both are handled here, so a failed command is never
+    reported to the user as a success.
     """
+    try:
+        raw = fn(**kwargs)
+    except (Exception, SystemExit) as exc:
+        # SystemExit is caught on purpose: if any library calls
+        # sys.exit() during auth, it must not take ZOE down with it.
+        print(f"[Spotify Agent] {action} failed: {type(exc).__name__}: {exc}")
+        traceback.print_exc()
+        return _failure(action, str(exc) or type(exc).__name__)
 
-    if result is None:
-        return {}
-
-    if not isinstance(result, dict):
-        return {
-            "value": result,
-        }
-
-    # --------------------------------------------------------
-    # MUSIC
-    # --------------------------------------------------------
-
-    if action in {
-        "play",
-        "current",
-        "search",
-    }:
-        return _normalize_music_result(
+    if isinstance(raw, dict) and raw.get("success") is False:
+        return _failure(
             action,
-            result,
+            raw.get("error") or f"Spotify couldn't {action}.",
         )
 
-    # --------------------------------------------------------
-    # PLAYLISTS
-    # --------------------------------------------------------
-
-    if action == "playlists":
-        return _normalize_playlists(
-            result
-        )
-
-    # --------------------------------------------------------
-    # DEVICES
-    # --------------------------------------------------------
-
-    if action == "devices":
-        return _normalize_devices(
-            result
-        )
-
-    # --------------------------------------------------------
-    # PLAYBACK
-    # --------------------------------------------------------
-
-    if action in {
-        "pause",
-        "resume",
-        "next",
-        "previous",
-    }:
-        return _normalize_playback_result(
-            action,
-            result,
-        )
-
-    return dict(result)
-
-
-# ============================================================
-# MUSIC NORMALIZATION
-# ============================================================
-
-def _normalize_music_result(
-    action: str,
-    result: dict[str, Any],
-) -> dict[str, Any]:
-
-    # --------------------------------------------------------
-    # SEARCH RESULT
-    # --------------------------------------------------------
-
-    if action == "search":
-
-        return _normalize_search_result(
-            result
-        )
-
-    # --------------------------------------------------------
-    # TRACK RESULT
-    # --------------------------------------------------------
-
-    data: dict[str, Any] = {}
-
-    item = result.get("item")
-
-    # Some implementations return:
-    #
-    # {
-    #     "name": "...",
-    #     "artist": "...",
-    # }
-    #
-    # while Spotify itself may return:
-    #
-    # {
-    #     "item": {...}
-    # }
-
-    source = (
-        item
-        if isinstance(item, dict)
-        else result
-    )
-
-    # --------------------------------------------------------
-    # Basic fields
-    # --------------------------------------------------------
-
-    if source.get("type"):
-        data["type"] = source["type"]
-
-    if source.get("name"):
-        data["name"] = source["name"]
-
-    if source.get("uri"):
-        data["uri"] = source["uri"]
-
-    if source.get("url"):
-        data["url"] = source["url"]
-
-    if source.get("duration_ms") is not None:
-        data["duration_ms"] = source[
-            "duration_ms"
-        ]
-
-    # --------------------------------------------------------
-    # Artist
-    # --------------------------------------------------------
-
-    artist_names: list[str] = []
-
-    artists = source.get("artists")
-
-    if isinstance(artists, list):
-
-        for artist in artists:
-
-            if isinstance(artist, dict):
-
-                name = artist.get("name")
-
-                if name:
-                    artist_names.append(
-                        str(name)
-                    )
-
-            elif isinstance(artist, str):
-                artist_names.append(
-                    artist
-                )
-
-    if artist_names:
-
-        data["artists"] = artist_names
-
-        data["artist"] = ", ".join(
-            artist_names
-        )
-
-    elif source.get("artist"):
-
-        data["artist"] = str(
-            source["artist"]
-        )
-
-    # --------------------------------------------------------
-    # Album
-    # --------------------------------------------------------
-
-    album = source.get("album")
-
-    if isinstance(album, dict):
-
-        if album.get("name"):
-            data["album"] = album[
-                "name"
-            ]
-
-        if album.get("uri"):
-            data["album_uri"] = album[
-                "uri"
-            ]
-
-    elif isinstance(album, str):
-
-        data["album"] = album
-
-    elif source.get("album_name"):
-
-        data["album"] = str(
-            source["album_name"]
-        )
-
-    # --------------------------------------------------------
-    # Playback state
-    # --------------------------------------------------------
-
-    if result.get("is_playing") is not None:
-        data["is_playing"] = bool(
-            result["is_playing"]
-        )
-
-    if result.get("device") is not None:
-        data["device"] = result[
-            "device"
-        ]
-
-    # --------------------------------------------------------
-    # Preserve useful metadata
-    # --------------------------------------------------------
-
-    for key in (
-        "success",
-        "reason",
-    ):
-
-        if key in result:
-            data[key] = result[key]
-
-    return data
-
-
-# ============================================================
-# SEARCH NORMALIZATION
-# ============================================================
-
-def _normalize_search_result(
-    result: dict[str, Any],
-) -> dict[str, Any]:
-
-    raw_results = (
-        result.get("results")
-        or result.get("items")
-        or result.get("tracks")
-        or result.get("data")
-    )
-
-    if isinstance(raw_results, dict):
-
-        raw_results = (
-            raw_results.get("items")
-            or raw_results.get("results")
-            or []
-        )
-
-    if not isinstance(
-        raw_results,
-        list,
-    ):
-        raw_results = []
-
-    normalized: list[dict[str, Any]] = []
-
-    for item in raw_results:
-
-        if not isinstance(
-            item,
-            dict,
-        ):
-            continue
-
-        track = _normalize_track(
-            item
-        )
-
-        if track:
-            normalized.append(
-                track
-            )
-
-    return {
-        "count": len(normalized),
-        "results": normalized,
-    }
-
-
-# ============================================================
-# TRACK NORMALIZATION
-# ============================================================
-
-def _normalize_track(
-    track: dict[str, Any],
-) -> dict[str, Any]:
-
-    item: dict[str, Any] = {}
-
-    if track.get("name"):
-        item["name"] = track[
-            "name"
-        ]
-
-    if track.get("uri"):
-        item["uri"] = track[
-            "uri"
-        ]
-
-    if track.get("url"):
-        item["url"] = track[
-            "url"
-        ]
-
-    artists = track.get(
-        "artists"
-    )
-
-    artist_names: list[str] = []
-
-    if isinstance(
-        artists,
-        list,
-    ):
-
-        for artist in artists:
-
-            if isinstance(
-                artist,
-                dict,
-            ):
-
-                if artist.get("name"):
-                    artist_names.append(
-                        str(
-                            artist["name"]
-                        )
-                    )
-
-            elif isinstance(
-                artist,
-                str,
-            ):
-                artist_names.append(
-                    artist
-                )
-
-    if artist_names:
-
-        item["artists"] = artist_names
-        item["artist"] = ", ".join(
-            artist_names
-        )
-
-    elif track.get("artist"):
-
-        item["artist"] = str(
-            track["artist"]
-        )
-
-    album = track.get(
-        "album"
-    )
-
-    if isinstance(
-        album,
-        dict,
-    ):
-
-        if album.get("name"):
-            item["album"] = album[
-                "name"
-            ]
-
-    elif album:
-
-        item["album"] = str(
-            album
-        )
-
-    return item
-
-
-# ============================================================
-# PLAYLIST NORMALIZATION
-# ============================================================
-
-def _normalize_playlists(
-    result: dict[str, Any],
-) -> dict[str, Any]:
-
-    playlists = (
-        result.get("playlists")
-        or result.get("items")
-        or result.get("data")
-    )
-
-    if isinstance(
-        playlists,
-        dict,
-    ):
-        playlists = (
-            playlists.get("items")
-            or playlists.get("playlists")
-            or []
-        )
-
-    if not isinstance(
-        playlists,
-        list,
-    ):
-        playlists = []
-
-    normalized: list[dict[str, Any]] = []
-
-    for playlist in playlists:
-
-        if not isinstance(
-            playlist,
-            dict,
-        ):
-            continue
-
-        item: dict[str, Any] = {}
-
-        if playlist.get("name"):
-            item["name"] = playlist[
-                "name"
-            ]
-
-        if playlist.get("uri"):
-            item["uri"] = playlist[
-                "uri"
-            ]
-
-        if playlist.get("url"):
-            item["url"] = playlist[
-                "url"
-            ]
-
-        if playlist.get("id"):
-            item["id"] = playlist[
-                "id"
-            ]
-
-        tracks = playlist.get(
-            "tracks"
-        )
-
-        if isinstance(
-            tracks,
-            dict,
-        ):
-
-            if tracks.get("total") is not None:
-                item["tracks"] = tracks[
-                    "total"
-                ]
-
-        elif isinstance(
-            tracks,
-            int,
-        ):
-            item["tracks"] = tracks
-
-        if item:
-            normalized.append(
-                item
-            )
-
-    return {
-        "count": len(normalized),
-        "playlists": normalized,
-    }
-
-
-# ============================================================
-# DEVICE NORMALIZATION
-# ============================================================
-
-def _normalize_devices(
-    result: dict[str, Any],
-) -> dict[str, Any]:
-
-    devices = (
-        result.get("devices")
-        or result.get("items")
-        or result.get("data")
-    )
-
-    if isinstance(
-        devices,
-        dict,
-    ):
-        devices = (
-            devices.get("devices")
-            or devices.get("items")
-            or []
-        )
-
-    if not isinstance(
-        devices,
-        list,
-    ):
-        devices = []
-
-    normalized: list[dict[str, Any]] = []
-
-    for device in devices:
-
-        if not isinstance(
-            device,
-            dict,
-        ):
-            continue
-
-        item: dict[str, Any] = {}
-
-        for key in (
-            "id",
-            "name",
-            "type",
-            "volume_percent",
-            "is_active",
-        ):
-
-            if key in device:
-                item[key] = device[
-                    key
-                ]
-
-        if item:
-            normalized.append(
-                item
-            )
-
-    return {
-        "count": len(normalized),
-        "devices": normalized,
-    }
-
-
-# ============================================================
-# PLAYBACK NORMALIZATION
-# ============================================================
-
-def _normalize_playback_result(
-    action: str,
-    result: dict[str, Any],
-) -> dict[str, Any]:
-
-    data: dict[str, Any] = {}
-
-    # --------------------------------------------------------
-    # Explicit state
-    # --------------------------------------------------------
-
-    if result.get("state") is not None:
-        data["state"] = result[
-            "state"
-        ]
-
-    if result.get("is_playing") is not None:
-        data["is_playing"] = bool(
-            result["is_playing"]
-        )
-
-    if result.get("device") is not None:
-        data["device"] = result[
-            "device"
-        ]
-
-    # --------------------------------------------------------
-    # Returned track
-    # --------------------------------------------------------
-
-    track = result.get(
-        "track"
-    )
-
-    if isinstance(
-        track,
-        dict,
-    ):
-
-        normalized_track = _normalize_track(
-            track
-        )
-
-        if normalized_track:
-            data["track"] = normalized_track
-
-    # --------------------------------------------------------
-    # Some implementations return track
-    # fields directly.
-    # --------------------------------------------------------
-
-    if (
-        action in {
-            "next",
-            "previous",
-        }
-        and "track" not in data
-        and (
-            result.get("name")
-            or result.get("artist")
-        )
-    ):
-
-        track_data = _normalize_track(
-            result
-        )
-
-        if track_data:
-            data["track"] = track_data
-
-    # --------------------------------------------------------
-    # Fallback state
-    # --------------------------------------------------------
-
-    if not data:
-
-        fallback_states = {
-            "pause": "paused",
-            "resume": "playing",
-            "next": "skipped",
-            "previous": "previous",
-        }
-
-        data["state"] = fallback_states.get(
-            action,
-            action,
-        )
-
-    return data
+    return _success(action, raw)
 
 
 # ============================================================
 # HUMAN-READABLE MESSAGES
 # ============================================================
 
-def _track_description(
-    track: dict[str, Any],
-) -> str:
+def _item_label(item: dict[str, Any]) -> str:
+    name = item.get("name") or "Unknown"
+    artist = item.get("artist")
 
-    name = track.get(
-        "name"
-    )
-
-    artist = track.get(
-        "artist"
-    )
-
-    album = track.get(
-        "album"
-    )
-
-    if name and artist and album:
-        return (
-            f'"{name}" by {artist} '
-            f'from {album}'
-        )
-
-    if name and artist:
-        return (
-            f'"{name}" by {artist}'
-        )
-
-    if name:
-        return f'"{name}"'
-
-    return "the selected track"
+    return f'"{name}" by {artist}' if artist else f'"{name}"'
 
 
-def _build_message(
-    action: str,
-    data: dict[str, Any],
-) -> str:
+def _build_message(action: str, raw: Any) -> str:
+    # ---------------- PLAY ----------------
+    if action == "play_track":
+        track = raw.get("track")
+        artist = raw.get("artist")
 
-    # --------------------------------------------------------
-    # PLAY
-    # --------------------------------------------------------
-
-    if action == "play":
-
-        name = data.get(
-            "name"
-        )
-
-        artist = data.get(
-            "artist"
-        )
-
-        album = data.get(
-            "album"
-        )
-
-        if name and artist and album:
-            return (
-                f'Now playing "{name}" by '
-                f'{artist} from {album}.'
-            )
-
-        if name and artist:
-            return (
-                f'Now playing "{name}" by '
-                f'{artist}.'
-            )
-
-        if name:
-            return (
-                f'Now playing "{name}".'
-            )
-
+        if track and artist:
+            return f'Now playing "{track}" by {artist}.'
+        if track:
+            return f'Now playing "{track}".'
         return "Spotify playback started."
 
-    # --------------------------------------------------------
-    # CURRENT
-    # --------------------------------------------------------
+    if action == "play_artist":
+        artist = raw.get("artist")
+        return f"Now playing {artist}." if artist else "Spotify playback started."
 
-    if action == "current":
+    if action == "play_album":
+        album = raw.get("album")
+        artist = raw.get("artist")
 
-        name = data.get(
-            "name"
-        )
+        if album and artist:
+            return f'Now playing the album "{album}" by {artist}.'
+        if album:
+            return f'Now playing the album "{album}".'
+        return "Spotify playback started."
 
-        artist = data.get(
-            "artist"
-        )
-
-        album = data.get(
-            "album"
-        )
-
-        if name and artist and album:
-            return (
-                f'Currently playing "{name}" by '
-                f'{artist} from {album}.'
-            )
-
-        if name and artist:
-            return (
-                f'Currently playing "{name}" by '
-                f'{artist}.'
-            )
-
-        if name:
-            return (
-                f'Currently playing "{name}".'
-            )
-
+    if action == "play_playlist":
+        name = raw.get("playlist_name")
         return (
-            "Nothing useful is currently "
-            "playing on Spotify."
+            f'Now playing your "{name}" playlist.'
+            if name
+            else "Spotify playback started."
         )
 
-    # --------------------------------------------------------
-    # SEARCH
-    # --------------------------------------------------------
-
-    if action == "search":
-
-        count = data.get(
-            "count",
-            0,
-        )
-
-        if count == 0:
-            return (
-                "I couldn't find any matching "
-                "Spotify results."
-            )
-
-        if count == 1:
-            result = data[
-                "results"
-            ][0]
-
-            description = _track_description(
-                result
-            )
-
-            return (
-                f'I found one match: '
-                f'{description}.'
-            )
-
-        return (
-            f'I found {count} matching '
-            f'Spotify results.'
-        )
-
-    # --------------------------------------------------------
-    # PLAYLISTS
-    # --------------------------------------------------------
-
-    if action == "playlists":
-
-        count = data.get(
-            "count",
-            0,
-        )
-
-        playlists = data.get(
-            "playlists",
-            [],
-        )
-
-        if count == 0:
-            return (
-                "You don't appear to have "
-                "any Spotify playlists available."
-            )
-
-        if count == 1:
-            name = (
-                playlists[0].get("name")
-                if playlists
-                else None
-            )
-
-            if name:
-                return (
-                    f'You have one playlist: '
-                    f'"{name}".'
-                )
-
-            return (
-                "You have one Spotify playlist."
-            )
-
-        names = [
-            item.get("name")
-            for item in playlists
-            if isinstance(item, dict)
-            and item.get("name")
-        ]
-
-        if 0 < len(names) <= 5:
-            formatted = ", ".join(
-                f'"{name}"'
-                for name in names
-            )
-
-            return (
-                f'You have {count} Spotify playlists: '
-                f'{formatted}.'
-            )
-
-        return (
-            f'You have {count} Spotify playlists.'
-        )
-
-    # --------------------------------------------------------
-    # DEVICES
-    # --------------------------------------------------------
-
-    if action == "devices":
-
-        count = data.get(
-            "count",
-            0,
-        )
-
-        devices = data.get(
-            "devices",
-            [],
-        )
-
-        if count == 0:
-            return (
-                "I couldn't find any available "
-                "Spotify devices."
-            )
-
-        active = [
-            device
-            for device in devices
-            if isinstance(device, dict)
-            and device.get("is_active")
-        ]
-
-        if active:
-
-            active_names = [
-                device.get("name")
-                for device in active
-                if device.get("name")
-            ]
-
-            if active_names:
-                return (
-                    f'I found {count} available '
-                    f'Spotify device'
-                    f'{"s" if count != 1 else ""}. '
-                    f'{" and ".join(active_names)} '
-                    f'{"is" if len(active_names) == 1 else "are"} '
-                    f'currently active.'
-                )
-
-        if count == 1:
-
-            name = (
-                devices[0].get("name")
-                if devices
-                else None
-            )
-
-            if name:
-                return (
-                    f'I found one available '
-                    f'Spotify device: "{name}".'
-                )
-
-            return (
-                "I found one available "
-                "Spotify device."
-            )
-
-        return (
-            f'I found {count} available '
-            f'Spotify devices.'
-        )
-
-    # --------------------------------------------------------
-    # PAUSE
-    # --------------------------------------------------------
-
+    # ---------------- CONTROLS ----------------
     if action == "pause":
         return "Spotify playback paused."
 
-    # --------------------------------------------------------
-    # RESUME
-    # --------------------------------------------------------
-
     if action == "resume":
-
-        track = data.get(
-            "track"
-        )
-
-        if isinstance(
-            track,
-            dict,
-        ):
-
-            description = _track_description(
-                track
-            )
-
-            return (
-                f'Resumed playback of '
-                f'{description}.'
-            )
-
         return "Spotify playback resumed."
 
-    # --------------------------------------------------------
-    # NEXT
-    # --------------------------------------------------------
-
     if action == "next":
-
-        track = data.get(
-            "track"
-        )
-
-        if isinstance(
-            track,
-            dict,
-        ):
-
-            description = _track_description(
-                track
-            )
-
-            return (
-                f'Skipped to {description}.'
-            )
-
-        return (
-            "Skipped to the next track."
-        )
-
-    # --------------------------------------------------------
-    # PREVIOUS
-    # --------------------------------------------------------
+        return "Skipped to the next track."
 
     if action == "previous":
+        return "Returned to the previous track."
 
-        track = data.get(
-            "track"
+    # ---------------- CURRENT ----------------
+    if action == "current":
+        if not raw or not raw.get("name"):
+            return "Nothing is playing on Spotify right now."
+
+        label = _item_label(raw)
+        album = raw.get("album")
+        suffix = f" from {album}" if album else ""
+
+        if raw.get("is_playing"):
+            return f"Currently playing {label}{suffix}."
+
+        return f"Paused on {label}{suffix}."
+
+    # ---------------- SEARCH ----------------
+    if action == "search":
+        results = raw or []
+
+        if not results:
+            return "I couldn't find any matching Spotify results."
+
+        top = "; ".join(
+            f"{i}. {_item_label(item)}"
+            for i, item in enumerate(results[:3], start=1)
         )
 
-        if isinstance(
-            track,
-            dict,
-        ):
+        return f"I found {len(results)} results. Top matches: {top}."
 
-            description = _track_description(
-                track
-            )
+    # ---------------- PLAYLISTS ----------------
+    if action == "playlists":
+        playlists = raw or []
 
+        if not playlists:
+            return "No playlists are configured."
+
+        listing = ", ".join(
+            f"{p['number']}. {p['name']}"
+            for p in playlists
+        )
+
+        return f"You have {len(playlists)} playlists: {listing}."
+
+    # ---------------- DEVICES ----------------
+    if action == "devices":
+        devices = raw or []
+
+        if not devices:
             return (
-                f'Returned to {description}.'
+                "I couldn't find any Spotify devices. "
+                "Open Spotify on a device and try again."
             )
 
-        return (
-            "Returned to the previous track."
+        names = ", ".join(
+            f"{d.get('name', 'Unknown')}"
+            f"{' (active)' if d.get('is_active') else ''}"
+            for d in devices
         )
 
-    # --------------------------------------------------------
-    # FALLBACK
-    # --------------------------------------------------------
+        plural = "s" if len(devices) != 1 else ""
 
-    return (
-        "Spotify operation completed."
-    )
+        return f"I found {len(devices)} Spotify device{plural}: {names}."
+
+    return "Spotify operation completed."
 
 
 # ============================================================
 # TOOL IMPLEMENTATIONS
+#
+# Each is a thin wrapper over exactly one spotify.py function.
 # ============================================================
 
-def spotify_play_tool(
-    query: str,
+def spotify_play_track_tool(
+    name: str,
+    artist: Optional[str] = None,
 ) -> dict[str, Any]:
+    return _run(
+        "play_track",
+        spotify_play_track,
+        name=str(name or "").strip(),
+        artist=(artist or None),
+    )
 
-    query = str(
-        query or ""
-    ).strip()
 
-    if not query:
-        return _failure(
-            "play",
-            "No music query provided.",
-        )
+def spotify_play_artist_tool(name: str) -> dict[str, Any]:
+    return _run(
+        "play_artist",
+        spotify_play_artist,
+        name=str(name or "").strip(),
+    )
 
-    try:
 
-        result = spotify_play(
-            query
-        )
+def spotify_play_album_tool(
+    name: str,
+    artist: Optional[str] = None,
+) -> dict[str, Any]:
+    return _run(
+        "play_album",
+        spotify_play_album,
+        name=str(name or "").strip(),
+        artist=(artist or None),
+    )
 
-        return _success(
-            "play",
-            result,
-        )
 
-    except Exception as exc:
-
-        return _failure(
-            "play",
-            str(exc),
-        )
+def spotify_play_playlist_tool(number: int | str) -> dict[str, Any]:
+    return _run(
+        "play_playlist",
+        spotify_play_playlist,
+        number=number,
+    )
 
 
 def spotify_pause_tool() -> dict[str, Any]:
-
-    try:
-
-        result = spotify_play_pause(
-            "pause"
-        )
-
-        return _success(
-            "pause",
-            result,
-        )
-
-    except Exception as exc:
-
-        return _failure(
-            "pause",
-            str(exc),
-        )
+    return _run("pause", spotify_pause)
 
 
 def spotify_resume_tool() -> dict[str, Any]:
-
-    try:
-
-        result = spotify_play_pause(
-            "resume"
-        )
-
-        return _success(
-            "resume",
-            result,
-        )
-
-    except Exception as exc:
-
-        return _failure(
-            "resume",
-            str(exc),
-        )
+    return _run("resume", spotify_resume)
 
 
 def spotify_next_tool() -> dict[str, Any]:
-
-    try:
-
-        result = spotify_next()
-
-        return _success(
-            "next",
-            result,
-        )
-
-    except Exception as exc:
-
-        return _failure(
-            "next",
-            str(exc),
-        )
+    return _run("next", spotify_next)
 
 
 def spotify_previous_tool() -> dict[str, Any]:
-
-    try:
-
-        result = spotify_previous()
-
-        return _success(
-            "previous",
-            result,
-        )
-
-    except Exception as exc:
-
-        return _failure(
-            "previous",
-            str(exc),
-        )
+    return _run("previous", spotify_previous)
 
 
 def spotify_current_tool() -> dict[str, Any]:
-
-    try:
-
-        result = get_current_song()
-
-        return _success(
-            "current",
-            result,
-        )
-
-    except Exception as exc:
-
-        return _failure(
-            "current",
-            str(exc),
-        )
+    return _run("current", get_current_song)
 
 
 def spotify_search_tool(
     query: str,
+    search_type: str = "track",
 ) -> dict[str, Any]:
-
-    query = str(
-        query or ""
-    ).strip()
+    query = str(query or "").strip()
 
     if not query:
-        return _failure(
-            "search",
-            "No search query provided.",
-        )
+        return _failure("search", "No search query provided.")
 
-    try:
-
-        result = spotify_search(
-            query
-        )
-
-        return _success(
-            "search",
-            result,
-        )
-
-    except Exception as exc:
-
-        return _failure(
-            "search",
-            str(exc),
-        )
+    return _run(
+        "search",
+        spotify_search,
+        query=query,
+        search_type=search_type or "track",
+    )
 
 
 def spotify_playlists_tool() -> dict[str, Any]:
-
-    try:
-
-        result = get_playlists()
-
-        return _success(
-            "playlists",
-            result,
-        )
-
-    except Exception as exc:
-
-        return _failure(
-            "playlists",
-            str(exc),
-        )
+    return _run("playlists", get_configured_playlists)
 
 
 def spotify_devices_tool() -> dict[str, Any]:
-
-    try:
-
-        result = get_devices()
-
-        return _success(
-            "devices",
-            result,
-        )
-
-    except Exception as exc:
-
-        return _failure(
-            "devices",
-            str(exc),
-        )
+    return _run("devices", get_devices)
 
 
 # ============================================================
 # GROQ TOOL DECLARATIONS
 # ============================================================
 
+def _tool(
+    name: str,
+    description: str,
+    properties: dict[str, Any] | None = None,
+    required: list[str] | None = None,
+) -> dict[str, Any]:
+    return {
+        "type": "function",
+        "function": {
+            "name": name,
+            "description": description,
+            "parameters": {
+                "type": "object",
+                "properties": properties or {},
+                "required": required or [],
+                "additionalProperties": False,
+            },
+        },
+    }
+
+
 spotify_tools = [
-    {
-        "type": "function",
-        "function": {
-            "name": "spotify_play",
-            "description": (
-                "Play a Spotify song, artist, album, or playlist."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": (
-                            "The user's exact music request."
-                        ),
-                    },
-                },
-                "required": ["query"],
-                "additionalProperties": False,
+    _tool(
+        "spotify_play_playlist",
+        "Play one of ZOE's configured playlists by its number.",
+        {
+            "number": {
+                "type": "integer",
+                "enum": list(PLAYLISTS.keys()),
+                "description": "Configured playlist number.",
             },
         },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "spotify_pause",
-            "description": "Pause Spotify playback.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "additionalProperties": False,
+        ["number"],
+    ),
+    _tool(
+        "spotify_play_track",
+        "Play a single song.",
+        {
+            "name": {"type": "string", "description": "Song title."},
+            "artist": {"type": "string", "description": "Artist, if given."},
+        },
+        ["name"],
+    ),
+    _tool(
+        "spotify_play_artist",
+        "Play an artist.",
+        {"name": {"type": "string", "description": "Artist name."}},
+        ["name"],
+    ),
+    _tool(
+        "spotify_play_album",
+        "Play an album.",
+        {
+            "name": {"type": "string", "description": "Album title."},
+            "artist": {"type": "string", "description": "Artist, if given."},
+        },
+        ["name"],
+    ),
+    _tool(
+        "spotify_search",
+        "Search Spotify without starting playback.",
+        {
+            "query": {"type": "string", "description": "Search text."},
+            "search_type": {
+                "type": "string",
+                "enum": ["track", "artist", "album", "playlist"],
+                "description": "What to search for. Default track.",
             },
         },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "spotify_resume",
-            "description": "Resume Spotify playback.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "additionalProperties": False,
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "spotify_next",
-            "description": "Skip to the next Spotify track.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "additionalProperties": False,
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "spotify_previous",
-            "description": "Play the previous Spotify track.",
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "additionalProperties": False,
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "spotify_current",
-            "description": (
-                "Return the currently playing Spotify track."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "additionalProperties": False,
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "spotify_search",
-            "description": (
-                "Search Spotify without starting playback."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": (
-                            "The exact search request."
-                        ),
-                    },
-                },
-                "required": ["query"],
-                "additionalProperties": False,
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "spotify_playlists",
-            "description": (
-                "Return the user's Spotify playlists."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "additionalProperties": False,
-            },
-        },
-    },
-    {
-        "type": "function",
-        "function": {
-            "name": "spotify_devices",
-            "description": (
-                "Return available Spotify playback devices."
-            ),
-            "parameters": {
-                "type": "object",
-                "properties": {},
-                "additionalProperties": False,
-            },
-        },
-    },
+        ["query"],
+    ),
+    _tool("spotify_pause", "Pause Spotify playback."),
+    _tool("spotify_resume", "Resume Spotify playback."),
+    _tool("spotify_next", "Skip to the next track."),
+    _tool("spotify_previous", "Go to the previous track."),
+    _tool("spotify_current", "Return the currently playing track."),
+    _tool("spotify_playlists", "List ZOE's configured playlists."),
+    _tool("spotify_devices", "List available Spotify devices."),
 ]
 
 
@@ -1608,8 +555,11 @@ spotify_tools = [
 # HANDLERS
 # ============================================================
 
-TOOL_HANDLERS = {
-    "spotify_play": spotify_play_tool,
+TOOL_HANDLERS: dict[str, Callable[..., dict[str, Any]]] = {
+    "spotify_play_playlist": spotify_play_playlist_tool,
+    "spotify_play_track": spotify_play_track_tool,
+    "spotify_play_artist": spotify_play_artist_tool,
+    "spotify_play_album": spotify_play_album_tool,
     "spotify_pause": spotify_pause_tool,
     "spotify_resume": spotify_resume_tool,
     "spotify_next": spotify_next_tool,
@@ -1623,26 +573,72 @@ TOOL_HANDLERS = {
 
 # ============================================================
 # FAST LOCAL ROUTER
+#
+# Handles only what is unambiguous. Anything that needs to
+# decide song vs. artist vs. album goes to Groq.
 # ============================================================
+
+_NUMBER_WORDS = {
+    "one": 1, "two": 2, "three": 3, "four": 4, "five": 5,
+    "six": 6, "seven": 7, "eight": 8, "nine": 9,
+}
+
+_PLAY_PREFIXES = (
+    "start playing",
+    "play me",
+    "put on",
+    "listen to",
+    "queue up",
+    "play",
+)
+
+_SEARCH_PREFIXES = (
+    "look up",
+    "look for",
+    "search",
+    "find",
+)
+
 
 def _extract_after_prefix(
     query: str,
     prefixes: tuple[str, ...],
 ) -> Optional[str]:
+    # Longest first, so "play me X" isn't swallowed by "play".
+    for prefix in sorted(prefixes, key=len, reverse=True):
+        match = re.match(
+            rf"^{re.escape(prefix)}\s+(.+)$",
+            query.strip(),
+            re.IGNORECASE,
+        )
 
-    normalized = normalize_text(
-        query
-    )
+        if match:
+            return match.group(1).strip()
 
-    for prefix in prefixes:
+    return None
 
-        if normalized.startswith(
-            prefix + " "
-        ):
 
-            return query[
-                len(prefix):
-            ].strip()
+def _match_configured_playlist(text: str) -> Optional[int]:
+    """
+    Match "Just OR", "my Just OR playlist", "playlist 2",
+    "number two", "#2" against the configured playlists.
+    """
+    t = normalize_text(text)
+    t = re.sub(r"^(?:my|the)\s+", "", t)
+    t = re.sub(r"\s+playlist$", "", t)
+
+    match = re.fullmatch(r"(?:playlist|number|no|#)\s*(\d+|[a-z]+)", t)
+
+    if match:
+        token = match.group(1)
+        number = int(token) if token.isdigit() else _NUMBER_WORDS.get(token)
+
+        if number in PLAYLISTS:
+            return number
+
+    for number, data in PLAYLISTS.items():
+        if normalize_text(data["name"]) == t:
+            return number
 
     return None
 
@@ -1650,196 +646,64 @@ def _extract_after_prefix(
 def _fast_route(
     query: str,
 ) -> Optional[tuple[str, dict[str, Any]]]:
-    """
-    Resolve obvious commands without Groq.
-
-    Conservative by design. If the request is ambiguous,
-    Groq handles the routing.
-    """
-
-    normalized = normalize_text(
-        query
-    )
+    normalized = normalize_text(query)
 
     if not normalized:
         return None
 
-    # ========================================================
-    # PAUSE
-    # ========================================================
+    if normalized in {"pause", "stop", "pause spotify", "stop spotify"}:
+        return "spotify_pause", {}
 
     if normalized in {
-        "pause",
-        "stop",
-        "pause spotify",
-        "stop spotify",
+        "resume", "continue", "resume spotify", "continue spotify", "play",
     }:
-
-        return (
-            "spotify_pause",
-            {},
-        )
-
-    # ========================================================
-    # RESUME
-    # ========================================================
+        return "spotify_resume", {}
 
     if normalized in {
-        "resume",
-        "continue",
-        "resume spotify",
-        "continue spotify",
-        "play",
+        "next", "skip", "skip song", "skip this", "next song",
+        "next track", "skip track",
     }:
-
-        return (
-            "spotify_resume",
-            {},
-        )
-
-    # ========================================================
-    # NEXT
-    # ========================================================
+        return "spotify_next", {}
 
     if normalized in {
-        "next",
-        "skip",
-        "skip song",
-        "skip this",
-        "next song",
-        "next track",
-        "skip track",
+        "previous", "prev", "back", "previous song",
+        "previous track", "go back",
     }:
-
-        return (
-            "spotify_next",
-            {},
-        )
-
-    # ========================================================
-    # PREVIOUS
-    # ========================================================
+        return "spotify_previous", {}
 
     if normalized in {
-        "previous",
-        "prev",
-        "back",
-        "previous song",
-        "previous track",
-        "go back",
+        "current", "current song", "what is playing", "whats playing",
+        "what's playing", "what is playing now", "what song is playing",
+        "what song is this", "what track is playing",
+        "what am i listening to", "what am i listening to right now",
     }:
-
-        return (
-            "spotify_previous",
-            {},
-        )
-
-    # ========================================================
-    # CURRENT
-    # ========================================================
+        return "spotify_current", {}
 
     if normalized in {
-        "current",
-        "current song",
-        "what is playing",
-        "whats playing",
-        "what's playing",
-        "what is playing now",
-        "what song is playing",
-        "what song is this",
-        "what track is playing",
-        "what am i listening to",
-        "what am i listening to right now",
+        "playlists", "my playlists", "show playlists",
+        "show my playlists", "list playlists", "list my playlists",
     }:
-
-        return (
-            "spotify_current",
-            {},
-        )
-
-    # ========================================================
-    # PLAYLISTS
-    # ========================================================
+        return "spotify_playlists", {}
 
     if normalized in {
-        "playlists",
-        "my playlists",
-        "show playlists",
-        "show my playlists",
-        "list playlists",
-        "list my playlists",
-    }:
-
-        return (
-            "spotify_playlists",
-            {},
-        )
-
-    # ========================================================
-    # DEVICES
-    # ========================================================
-
-    if normalized in {
-        "devices",
-        "spotify devices",
-        "available devices",
-        "spotify available devices",
-        "show devices",
+        "devices", "spotify devices", "available devices",
+        "spotify available devices", "show devices",
         "show spotify devices",
     }:
+        return "spotify_devices", {}
 
-        return (
-            "spotify_devices",
-            {},
-        )
-
-    # ========================================================
-    # SEARCH
-    # ========================================================
-
-    search_query = _extract_after_prefix(
-        query,
-        (
-            "search",
-            "find",
-            "look up",
-            "look for",
-        ),
-    )
+    search_query = _extract_after_prefix(query, _SEARCH_PREFIXES)
 
     if search_query:
+        return "spotify_search", {"query": search_query}
 
-        return (
-            "spotify_search",
-            {
-                "query": search_query,
-            },
-        )
-
-    # ========================================================
-    # PLAY
-    # ========================================================
-
-    play_query = _extract_after_prefix(
-        query,
-        (
-            "play",
-            "play me",
-            "put on",
-            "start playing",
-            "listen to",
-            "queue up",
-        ),
-    )
+    play_query = _extract_after_prefix(query, _PLAY_PREFIXES)
 
     if play_query:
+        number = _match_configured_playlist(play_query)
 
-        return (
-            "spotify_play",
-            {
-                "query": play_query,
-            },
-        )
+        if number is not None:
+            return "spotify_play_playlist", {"number": number}
 
     return None
 
@@ -1848,97 +712,51 @@ def _fast_route(
 # GROQ ROUTER
 # ============================================================
 
-def _groq_route(
-    query: str,
-) -> tuple[str, dict[str, Any]]:
+def _groq_route(query: str) -> tuple[str, dict[str, Any]]:
     """
-    Use Groq tool calling only when the local router
-    cannot confidently resolve the Spotify command.
-
-    Exactly one Spotify function call is required.
+    Use Groq tool calling when the local router can't resolve
+    the command. Exactly one function call is required.
     """
-
-    response = client.chat.completions.create(
+    response = _get_client().chat.completions.create(
         model=MODEL,
         messages=[
-            {
-                "role": "system",
-                "content": SYSTEM_PROMPT,
-            },
-            {
-                "role": "user",
-                "content": query,
-            },
+            {"role": "system", "content": _build_system_prompt()},
+            {"role": "user", "content": query},
         ],
         tools=spotify_tools,
         tool_choice="required",
         temperature=0.0,
-        max_tokens=64,
+        # gpt-oss is a reasoning model: reasoning tokens count against
+        # this limit, and 64 can truncate before the tool call is emitted.
+        max_tokens=512,
     )
 
     if not response.choices:
-        raise RuntimeError(
-            "Groq returned no choices."
-        )
+        raise RuntimeError("Groq returned no choices.")
 
-    message = response.choices[0].message
+    tool_calls = response.choices[0].message.tool_calls or []
 
-    tool_calls = message.tool_calls or []
-
-    if not tool_calls:
-        raise RuntimeError(
-            "Groq did not return a Spotify function call."
-        )
-
-    # We explicitly require exactly one operation.
     if len(tool_calls) != 1:
         raise RuntimeError(
-            "Groq returned multiple Spotify function calls."
+            f"Expected exactly one Spotify function call, got {len(tool_calls)}."
         )
 
-    tool_call = tool_calls[0]
+    function = tool_calls[0].function
 
-    if not tool_call.function:
+    if not function or function.name not in TOOL_HANDLERS:
         raise RuntimeError(
-            "Groq returned an invalid Spotify function call."
+            f"Unsupported Spotify function: {getattr(function, 'name', None)}"
         )
-
-    name = tool_call.function.name
-
-    if name not in TOOL_HANDLERS:
-        raise RuntimeError(
-            f"Groq returned unsupported Spotify "
-            f"function: {name}"
-        )
-
-    arguments_raw = (
-        tool_call.function.arguments
-        or "{}"
-    )
 
     try:
-        import json
-
-        arguments = json.loads(
-            arguments_raw
-        )
-
+        arguments = json.loads(function.arguments or "{}")
     except Exception as exc:
-        raise RuntimeError(
-            "Groq returned invalid Spotify "
-            "function arguments."
-        ) from exc
+        raise RuntimeError("Invalid Spotify function arguments.") from exc
 
     if not isinstance(arguments, dict):
-        raise RuntimeError(
-            "Groq returned invalid Spotify "
-            "function arguments."
-        )
+        raise RuntimeError("Invalid Spotify function arguments.")
 
-    return (
-        name,
-        arguments,
-    )
+    return function.name, arguments
 
 
 # ============================================================
@@ -1952,115 +770,51 @@ def run_spotify_agent(
     """
     Execute exactly one Spotify operation.
 
-    Public agent contract:
-        Returns only the final user-facing response string.
-
-    The runtime should receive:
-        "Now playing ..."
-        "Spotify playback paused."
-        "I found 5 matching Spotify results."
-
-    Internal routing/metadata remains inside this function.
+    Returns only the final user-facing response string.
     """
-
-    query = str(
-        query or ""
-    ).strip()
+    query = str(query or "").strip()
 
     if not query:
-        return (
-            "I didn't receive a Spotify request."
-        )
+        return "I didn't receive a Spotify request."
 
-    # ========================================================
-    # STEP 1 — FAST LOCAL ROUTING
-    # ========================================================
+    # STEP 1 - fast local routing
+    route = _fast_route(query)
 
-    route = _fast_route(
-        query
-    )
-
-    # ========================================================
-    # STEP 2 — GROQ ONLY IF NECESSARY
-    # ========================================================
-
+    # STEP 2 - Groq only if necessary
     if route is None:
-
         try:
-
-            route = _groq_route(
-                query
-            )
-
-        except Exception:
-            return (
-                "I couldn't determine which "
-                "Spotify action you wanted."
-            )
+            route = _groq_route(query)
+        except (Exception, SystemExit):
+            traceback.print_exc()
+            return "I couldn't determine which Spotify action you wanted."
 
     name, arguments = route
 
-    # ========================================================
-    # STEP 3 — RESOLVE HANDLER
-    # ========================================================
+    print(f"[Spotify Agent] Route: {name} {arguments}")
 
-    handler = TOOL_HANDLERS.get(
-        name
-    )
+    handler = TOOL_HANDLERS.get(name)
 
     if handler is None:
-        return (
-            "I couldn't execute that Spotify command."
-        )
+        return "I couldn't execute that Spotify command."
 
-    # ========================================================
-    # STEP 4 — EXECUTE EXACTLY ONE TOOL
-    # ========================================================
-
+    # STEP 3 - execute exactly one tool
     try:
+        result = handler(**arguments)
+    except (Exception, SystemExit):
+        traceback.print_exc()
+        return "Something went wrong while controlling Spotify."
 
-        result = handler(
-            **arguments
-        )
+    message = result.get("message")
 
-    except Exception:
-        return (
-            "Something went wrong while "
-            "controlling Spotify."
-        )
-
-    # ========================================================
-    # STEP 5 — RETURN SAME CONTRACT AS OTHER AGENTS
-    # ========================================================
-
-    if not isinstance(result, dict):
-        return str(result)
-
-    message = result.get(
-        "message"
-    )
-
-    if isinstance(
-        message,
-        str,
-    ) and message.strip():
-
+    if isinstance(message, str) and message.strip():
         return message.strip()
 
-    error = result.get(
-        "error"
-    )
+    error = result.get("error")
 
-    if isinstance(
-        error,
-        str,
-    ) and error.strip():
-
+    if isinstance(error, str) and error.strip():
         return error.strip()
 
-    return (
-        "Spotify operation completed."
-    )
+    return "Spotify operation completed."
 
 
 # ============================================================
@@ -2070,20 +824,16 @@ def run_spotify_agent(
 AGENT_NAME = "spotify"
 
 AGENT_DESCRIPTION = (
-    "Controls Spotify playback, search, playlists, "
+    "Controls Spotify playback, search, configured playlists, "
     "current playback, and devices."
 )
 
 INPUT_SCHEMA = {
     "type": "object",
     "properties": {
-        "query": {
-            "type": "string",
-        }
+        "query": {"type": "string"},
     },
-    "required": [
-        "query"
-    ],
+    "required": ["query"],
 }
 
 
@@ -2092,30 +842,13 @@ INPUT_SCHEMA = {
 # ============================================================
 
 if __name__ == "__main__":
-
     import sys
 
-    query = " ".join(
-        sys.argv[1:]
-    ).strip()
+    cli_query = " ".join(sys.argv[1:]).strip()
 
-    if not query:
-        query = input(
-            "Spotify > "
-        ).strip()
-
-    result = run_spotify_agent(
-        query
-    )
+    if not cli_query:
+        cli_query = input("Spotify > ").strip()
 
     print()
-
-    # --------------------------------------------------------
-    # USER-FACING OUTPUT
-    # --------------------------------------------------------
-
-    print(
-        f"ZOE: {result}"
-    )
-
+    print(f"ZOE: {run_spotify_agent(cli_query)}")
     print()

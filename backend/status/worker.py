@@ -1,10 +1,18 @@
+
 from __future__ import annotations
 
 from copy import deepcopy
+from dataclasses import dataclass
 from datetime import datetime, timezone
+import logging
 import os
 import threading
 import time
+from concurrent.futures import (
+    Future,
+    ThreadPoolExecutor,
+    TimeoutError as FutureTimeoutError,
+)
 from typing import Any, Callable
 
 from .events import EventBus, StatusEvent
@@ -12,7 +20,14 @@ from .state import StatusState
 
 
 # ============================================================
-# CONFIGURATION
+# LOGGING
+# ============================================================
+
+logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# CONFIGURATION HELPERS
 # ============================================================
 
 
@@ -23,9 +38,7 @@ def _env_float(
     minimum: float = 0.05,
 ) -> float:
     try:
-        value = float(
-            os.getenv(name, str(default))
-        )
+        value = float(os.getenv(name, str(default)))
     except (TypeError, ValueError):
         value = default
 
@@ -39,13 +52,33 @@ def _env_int(
     minimum: int = 0,
 ) -> int:
     try:
-        value = int(
-            os.getenv(name, str(default))
-        )
+        value = int(os.getenv(name, str(default)))
     except (TypeError, ValueError):
         value = default
 
     return max(minimum, value)
+
+
+def _env_bool(
+    name: str,
+    default: bool,
+) -> bool:
+    raw = os.getenv(name)
+
+    if raw is None:
+        return default
+
+    return raw.strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+
+
+# ============================================================
+# POLLING INTERVALS
+# ============================================================
 
 
 DEFAULT_INTERVALS = {
@@ -79,6 +112,48 @@ DEFAULT_INTERVALS = {
         30,
     ),
 }
+
+
+# ============================================================
+# PROVIDER TIMEOUTS
+# ============================================================
+
+DEFAULT_PROVIDER_TIMEOUTS = {
+    "calendar": _env_float(
+        "ZOE_STATUS_CALENDAR_TIMEOUT",
+        10,
+    ),
+
+    "tasks": _env_float(
+        "ZOE_STATUS_TASK_TIMEOUT",
+        5,
+    ),
+
+    "mail": _env_float(
+        "ZOE_STATUS_MAIL_TIMEOUT",
+        10,
+    ),
+
+    "weather": _env_float(
+        "ZOE_STATUS_WEATHER_TIMEOUT",
+        8,
+    ),
+
+    "spotify": _env_float(
+        "ZOE_STATUS_SPOTIFY_TIMEOUT",
+        5,
+    ),
+
+    "system": _env_float(
+        "ZOE_STATUS_SYSTEM_TIMEOUT",
+        3,
+    ),
+}
+
+
+# ============================================================
+# REMINDER THRESHOLDS
+# ============================================================
 
 
 def _load_thresholds() -> tuple[int, ...]:
@@ -117,10 +192,75 @@ def _load_thresholds() -> tuple[int, ...]:
 REMINDER_THRESHOLDS = _load_thresholds()
 
 
+# ============================================================
+# TASK OVERDUE
+# ============================================================
+
+
 TASK_OVERDUE_GRACE_MINUTES = _env_int(
     "ZOE_STATUS_TASK_OVERDUE_GRACE_MINUTES",
     30,
 )
+
+
+# ============================================================
+# SYSTEM THRESHOLDS
+# ============================================================
+
+
+SYSTEM_MEMORY_HIGH_THRESHOLD = _env_float(
+    "ZOE_STATUS_MEMORY_HIGH_THRESHOLD",
+    90,
+    minimum=0,
+)
+
+
+SYSTEM_MEMORY_RECOVERY_THRESHOLD = _env_float(
+    "ZOE_STATUS_MEMORY_RECOVERY_THRESHOLD",
+    80,
+    minimum=0,
+)
+
+
+SYSTEM_DISK_HIGH_THRESHOLD = _env_float(
+    "ZOE_STATUS_DISK_HIGH_THRESHOLD",
+    90,
+    minimum=0,
+)
+
+
+SYSTEM_DISK_RECOVERY_THRESHOLD = _env_float(
+    "ZOE_STATUS_DISK_RECOVERY_THRESHOLD",
+    80,
+    minimum=0,
+)
+
+
+# ============================================================
+# SCHEDULER
+# ============================================================
+
+
+DEFAULT_POLL_SLEEP = _env_float(
+    "ZOE_STATUS_POLL_SLEEP",
+    0.5,
+)
+
+
+# ============================================================
+# SOURCE HEALTH
+# ============================================================
+
+
+@dataclass
+class SourceHealth:
+    status: str = "unknown"
+    updated_at: str | None = None
+    last_success_at: str | None = None
+    last_failure_at: str | None = None
+    latency_ms: float | None = None
+    failure_count: int = 0
+    error: str = ""
 
 
 # ============================================================
@@ -133,14 +273,14 @@ def _default_sources() -> dict[
     Callable[[], Any],
 ]:
     def calendar() -> Any:
-        from backend.functions.gcal import (
+        from backend.tools.gcal import (
             get_today_events,
         )
 
         return get_today_events()
 
     def tasks() -> Any:
-        from backend.functions.reminder import (
+        from backend.tools.reminder import (
             get_reminders,
         )
 
@@ -155,7 +295,7 @@ def _default_sources() -> dict[
         return result
 
     def mail() -> Any:
-        from backend.functions.mail import (
+        from backend.tools.mail import (
             check_emails,
         )
 
@@ -166,14 +306,16 @@ def _default_sources() -> dict[
         )
 
     def weather() -> Any:
-        from backend.functions.weather import (
+        from backend.tools.weather import (
             get_current_weather,
         )
 
         return get_current_weather()
 
     def spotify() -> Any:
-        from backend.functions.spotify import get_spotify
+        from backend.tools.spotify import (
+            get_spotify,
+        )
 
         sp = get_spotify()
 
@@ -186,8 +328,8 @@ def _default_sources() -> dict[
         """
         Basic host system observation.
 
-        psutil is intentionally imported lazily so importing the status
-        worker does not require psutil until system monitoring is enabled.
+        psutil is imported lazily so importing this module does
+        not require psutil until system monitoring is enabled.
         """
 
         try:
@@ -196,15 +338,31 @@ def _default_sources() -> dict[
             return {}
 
         memory = psutil.virtual_memory()
-        disk = psutil.disk_usage("/")
+
+        system_drive = os.environ.get(
+            "SystemDrive",
+            "C:",
+        )
+
+        disk_path = (
+            system_drive + "\\"
+            if os.name == "nt"
+            else "/"
+        )
+
+        disk = psutil.disk_usage(
+            disk_path
+        )
 
         return {
             "memory_percent": float(
                 memory.percent
             ),
+
             "disk_percent": float(
                 disk.percent
             ),
+
             "cpu_percent": float(
                 psutil.cpu_percent(
                     interval=None
@@ -262,15 +420,48 @@ def _key(
     """
     Stable-ish identity for provider items.
 
-    Provider IDs should always win.
+    Provider IDs are preferred.
+
+    Mutable human-facing fields are only fallbacks.
     """
 
-    return str(
-        item.get("id")
-        or item.get("uri")
-        or item.get("title")
-        or item.get("name")
-        or item
+    for field in (
+        "id",
+        "uri",
+        "uid",
+        "event_id",
+        "task_id",
+        "message_id",
+    ):
+        value = item.get(field)
+
+        if value not in (
+            None,
+            "",
+        ):
+            return str(value)
+
+    for field in (
+        "title",
+        "name",
+        "subject",
+    ):
+        value = item.get(field)
+
+        if value not in (
+            None,
+            "",
+        ):
+            return str(value)
+
+    return repr(
+        sorted(
+            (
+                str(key),
+                repr(value),
+            )
+            for key, value in item.items()
+        )
     )
 
 
@@ -288,7 +479,6 @@ def _parse_datetime(
                 "+00:00",
             )
         )
-
     except (
         TypeError,
         ValueError,
@@ -297,8 +487,10 @@ def _parse_datetime(
 
     if parsed.tzinfo is None:
         parsed = parsed.replace(
-            tzinfo=now.tzinfo
-            or timezone.utc
+            tzinfo=(
+                now.tzinfo
+                or timezone.utc
+            )
         )
 
     return parsed
@@ -309,23 +501,31 @@ def _minutes_until(
     now: datetime,
 ) -> int:
     """
-    Convert a timedelta to human-oriented integer minutes.
+    Convert timedelta to human-oriented integer minutes.
 
-    Truncates toward zero instead of using floor division.
+    Truncates toward zero.
 
     Examples:
 
-        +59 sec  ->  0
-        +61 sec  ->  1
-        -59 sec  ->  0
-        -61 sec  -> -1
+        +59 sec -> 0
+        +61 sec -> 1
+        -59 sec -> 0
+        -61 sec -> -1
     """
 
     seconds = (
         target - now
     ).total_seconds()
 
-    return int(seconds / 60)
+    return int(
+        seconds / 60
+    )
+
+
+def _timestamp(
+    value: datetime,
+) -> str:
+    return value.isoformat()
 
 
 # ============================================================
@@ -335,7 +535,7 @@ def _minutes_until(
 
 class StatusWorker:
     """
-    24/7 environmental observation layer.
+    Production-oriented 24/7 environmental observation layer.
 
     Responsibilities:
 
@@ -363,9 +563,14 @@ class StatusWorker:
             str,
             float,
         ] | None = None,
+        timeouts: dict[
+            str,
+            float,
+        ] | None = None,
         now: Callable[[], datetime] | None = None,
-        poll_sleep: float = 1.0,
+        poll_sleep: float = DEFAULT_POLL_SLEEP,
         recent_change_limit: int = 25,
+        max_workers: int | None = None,
     ) -> None:
         self.event_bus = (
             event_bus
@@ -400,6 +605,23 @@ class StatusWorker:
             in self.intervals.items()
         }
 
+        self.timeouts = {
+            **DEFAULT_PROVIDER_TIMEOUTS,
+            **(
+                timeouts
+                or {}
+            ),
+        }
+
+        self.timeouts = {
+            source: max(
+                0.05,
+                float(timeout),
+            )
+            for source, timeout
+            in self.timeouts.items()
+        }
+
         self.now = (
             now
             or (
@@ -412,12 +634,26 @@ class StatusWorker:
 
         self.poll_sleep = max(
             0.05,
-            poll_sleep,
+            float(poll_sleep),
         )
 
         self.recent_change_limit = max(
             1,
             recent_change_limit,
+        )
+
+        worker_count = (
+            max_workers
+            if max_workers is not None
+            else max(
+                1,
+                len(self.sources),
+            )
+        )
+
+        self._executor = ThreadPoolExecutor(
+            max_workers=worker_count,
+            thread_name_prefix="zoe-status-provider",
         )
 
         self._stop = threading.Event()
@@ -429,29 +665,48 @@ class StatusWorker:
             float,
         ] = {}
 
-        # Last successfully observed provider value.
         self._previous: dict[
             str,
             Any,
         ] = {}
 
-        # Reminder markers that have already fired.
-        #
-        # Each marker is:
-        #
-        #     (source, item_key, occurrence, threshold)
-        #
         self._thresholds_fired: set[
             tuple[str, str, str, int]
         ] = set()
 
-        # Current source health.
         self._source_status: dict[
             str,
             str,
         ] = {}
 
+        self._health: dict[
+            str,
+            SourceHealth,
+        ] = {
+            source: SourceHealth()
+            for source in self.sources
+        }
+
+        self._refresh_locks: dict[
+            str,
+            threading.Lock,
+        ] = {
+            source: threading.Lock()
+            for source in self.sources
+        }
+
         self._lock = threading.RLock()
+
+        # ----------------------------------------------------
+        # System alert latch state.
+        #
+        # True means an alert has already been emitted and
+        # recovery threshold must be crossed before another
+        # alert can occur.
+        # ----------------------------------------------------
+
+        self._memory_high = False
+        self._disk_high = False
 
     # ========================================================
     # LIFECYCLE
@@ -481,8 +736,8 @@ class StatusWorker:
 
             self._thread.start()
 
-            print(
-                "[STATUS] Worker started"
+            logger.info(
+                "Status worker started"
             )
 
     def stop(
@@ -499,12 +754,52 @@ class StatusWorker:
             is not threading.current_thread()
         ):
             thread.join(
-                timeout=timeout
+                timeout=max(
+                    0.0,
+                    timeout,
+                )
             )
 
-        print(
-            "[STATUS] Worker stopped"
+        logger.info(
+            "Status worker stopped"
         )
+
+    def close(
+        self,
+        timeout: float = 5.0,
+    ) -> None:
+        """
+        Stop the worker and release the provider executor.
+
+        Safe to call more than once.
+        """
+
+        self.stop(
+            timeout=timeout
+        )
+
+        try:
+            self._executor.shutdown(
+                wait=False,
+                cancel_futures=True,
+            )
+        except TypeError:
+            # Python versions without cancel_futures.
+            self._executor.shutdown(
+                wait=False
+            )
+
+    def __enter__(self) -> StatusWorker:
+        self.start()
+        return self
+
+    def __exit__(
+        self,
+        exc_type: Any,
+        exc_value: Any,
+        traceback: Any,
+    ) -> None:
+        self.close()
 
     # ========================================================
     # PUBLIC STATE API
@@ -512,6 +807,36 @@ class StatusWorker:
 
     def snapshot(self) -> dict[str, Any]:
         return self.state.snapshot()
+
+    def source_health(
+        self,
+    ) -> dict[str, dict[str, Any]]:
+        """
+        Return a safe snapshot of provider health.
+        """
+
+        with self._lock:
+            return {
+                source: {
+                    "status": health.status,
+                    "updated_at": health.updated_at,
+                    "last_success_at": (
+                        health.last_success_at
+                    ),
+                    "last_failure_at": (
+                        health.last_failure_at
+                    ),
+                    "latency_ms": (
+                        health.latency_ms
+                    ),
+                    "failure_count": (
+                        health.failure_count
+                    ),
+                    "error": health.error,
+                }
+                for source, health
+                in self._health.items()
+            }
 
     # ========================================================
     # MAIN LOOP
@@ -521,51 +846,126 @@ class StatusWorker:
         first_cycle = True
 
         while not self._stop.is_set():
-            monotonic_now = time.monotonic()
+            cycle_started = time.monotonic()
 
-            # Use exactly one clock value for this worker cycle.
-            cycle_now = self.now()
+            try:
+                cycle_now = self.now()
 
-            self.state.update_clock(
-                cycle_now
-            )
-
-            for source in list(
-                self.sources
-            ):
-                interval = self.intervals.get(
-                    source,
-                    300.0,
+                self.state.update_clock(
+                    cycle_now
                 )
 
-                last = self._last_refresh.get(
-                    source
-                )
+                due_sources: list[str] = []
 
-                due = (
-                    first_cycle
-                    or last is None
-                    or (
-                        monotonic_now
-                        - last
-                        >= interval
+                for source in list(
+                    self.sources
+                ):
+                    interval = self.intervals.get(
+                        source,
+                        300.0,
                     )
+
+                    last = self._last_refresh.get(
+                        source
+                    )
+
+                    due = (
+                        first_cycle
+                        or last is None
+                        or (
+                            cycle_started
+                            - last
+                            >= interval
+                        )
+                    )
+
+                    if due:
+                        due_sources.append(
+                            source
+                        )
+
+                # ------------------------------------------------
+                # Schedule due providers concurrently.
+                # ------------------------------------------------
+
+                futures: dict[
+                    str,
+                    Future[Any],
+                ] = {}
+
+                for source in due_sources:
+                    self._last_refresh[source] = (
+                        cycle_started
+                    )
+
+                    try:
+                        futures[source] = (
+                            self._executor.submit(
+                                self.refresh,
+                                source,
+                                initial=first_cycle,
+                                now=cycle_now,
+                            )
+                        )
+                    except Exception as exc:
+                        logger.exception(
+                            "Failed to schedule provider %s",
+                            source,
+                        )
+
+                        self._handle_source_failure(
+                            source,
+                            exc,
+                            cycle_now,
+                        )
+
+                # ------------------------------------------------
+                # Wait for submitted providers.
+                #
+                # The refresh method itself owns the provider
+                # timeout. This wait only collects completed
+                # refresh results and therefore does not block
+                # indefinitely.
+                # ------------------------------------------------
+
+                for source, future in futures.items():
+                    try:
+                        future.result(
+                            timeout=(
+                                self.timeouts.get(
+                                    source,
+                                    10.0,
+                                )
+                                + 1.0
+                            )
+                        )
+
+                    except FutureTimeoutError:
+                        # Normally refresh() should already have
+                        # converted provider timeout into a source
+                        # failure. This protects the scheduler
+                        # against unexpected hangs in refresh().
+                        logger.error(
+                            "Refresh handling timed out for source %s",
+                            source,
+                        )
+
+                    except Exception:
+                        logger.exception(
+                            "Unexpected refresh error for source %s",
+                            source,
+                        )
+
+                first_cycle = False
+
+            except Exception:
+                logger.exception(
+                    "Unexpected status-worker cycle failure"
                 )
 
-                if not due:
-                    continue
-
-                self._last_refresh[source] = (
-                    monotonic_now
-                )
-
-                self.refresh(
-                    source,
-                    initial=first_cycle,
-                    now=cycle_now,
-                )
-
-            first_cycle = False
+            # ----------------------------------------------------
+            # Wake periodically so stop() remains responsive.
+            # ----------------------------------------------------
 
             self._stop.wait(
                 self.poll_sleep
@@ -589,116 +989,192 @@ class StatusWorker:
         if provider is None:
             return []
 
-        current_now = (
-            now
-            or self.now()
+        refresh_lock = self._refresh_locks.setdefault(
+            source,
+            threading.Lock(),
         )
 
-        self.state.update_clock(
-            current_now
+        # Prevent simultaneous manual/automatic refreshes
+        # of the same provider.
+        acquired = refresh_lock.acquire(
+            blocking=False
         )
 
-        # ----------------------------------------------------
-        # Provider execution
-        # ----------------------------------------------------
+        if not acquired:
+            return []
 
         try:
-            value = provider()
+            current_now = (
+                now
+                or self.now()
+            )
 
-        except Exception as exc:
-            return self._handle_source_failure(
+            self.state.update_clock(
+                current_now
+            )
+
+            # ------------------------------------------------
+            # Provider execution with hard timeout.
+            # ------------------------------------------------
+
+            started = time.monotonic()
+
+            future = self._executor.submit(
+                provider
+            )
+
+            timeout = self.timeouts.get(
                 source,
-                exc,
-                current_now,
+                10.0,
             )
 
-        # ----------------------------------------------------
-        # Compare against last successful state
-        # ----------------------------------------------------
-
-        with self._lock:
-            previous_exists = (
-                source
-                in self._previous
-            )
-
-            previous = deepcopy(
-                self._previous.get(
-                    source
+            try:
+                value = future.result(
+                    timeout=timeout
                 )
-            )
 
-        events: list[StatusEvent] = []
+            except FutureTimeoutError:
+                future.cancel()
 
-        if (
-            not initial
-            and previous_exists
-        ):
-            events.extend(
-                self._detect_changes(
+                elapsed_ms = (
+                    time.monotonic()
+                    - started
+                ) * 1000
+
+                return self._handle_source_failure(
                     source,
-                    previous,
-                    value,
-                    current_now,
-                )
-            )
-
-        # ----------------------------------------------------
-        # Commit successful state
-        # ----------------------------------------------------
-
-        with self._lock:
-            self._previous[source] = (
-                deepcopy(value)
-            )
-
-            was_unavailable = (
-                self._source_status.get(
-                    source
-                )
-                == "unavailable"
-            )
-
-            self._source_status[source] = (
-                "current"
-            )
-
-        self._set_source(
-            source,
-            value,
-            "current",
-        )
-
-        # ----------------------------------------------------
-        # Source recovery
-        # ----------------------------------------------------
-
-        if was_unavailable:
-            events.insert(
-                0,
-                StatusEvent(
-                    type="source_recovered",
-                    source=source,
-                    data={
-                        "source": source,
-                    },
-                    importance="normal",
-                    identity=(
-                        f"{source}:recovered"
+                    TimeoutError(
+                        f"Provider timed out after "
+                        f"{timeout:.2f}s"
                     ),
-                ),
+                    current_now,
+                    latency_ms=elapsed_ms,
+                )
+
+            except Exception as exc:
+                elapsed_ms = (
+                    time.monotonic()
+                    - started
+                ) * 1000
+
+                return self._handle_source_failure(
+                    source,
+                    exc,
+                    current_now,
+                    latency_ms=elapsed_ms,
+                )
+
+            elapsed_ms = (
+                time.monotonic()
+                - started
+            ) * 1000
+
+            # ------------------------------------------------
+            # Compare against last successful state.
+            # ------------------------------------------------
+
+            with self._lock:
+                previous_exists = (
+                    source
+                    in self._previous
+                )
+
+                previous = deepcopy(
+                    self._previous.get(
+                        source
+                    )
+                )
+
+            events: list[StatusEvent] = []
+
+            if (
+                not initial
+                and previous_exists
+            ):
+                events.extend(
+                    self._detect_changes(
+                        source,
+                        previous,
+                        value,
+                        current_now,
+                    )
+                )
+
+            # ------------------------------------------------
+            # Commit successful state.
+            # ------------------------------------------------
+
+            with self._lock:
+                self._previous[source] = (
+                    deepcopy(value)
+                )
+
+                was_unavailable = (
+                    self._source_status.get(
+                        source
+                    )
+                    == "unavailable"
+                )
+
+                self._source_status[source] = (
+                    "current"
+                )
+
+                health = self._health.setdefault(
+                    source,
+                    SourceHealth(),
+                )
+
+                health.status = "current"
+                health.updated_at = _timestamp(
+                    current_now
+                )
+                health.last_success_at = _timestamp(
+                    current_now
+                )
+                health.latency_ms = elapsed_ms
+                health.error = ""
+
+            self._set_source(
+                source,
+                value,
+                "current",
             )
 
-        # ----------------------------------------------------
-        # Publish
-        # ----------------------------------------------------
+            # ------------------------------------------------
+            # Recovery.
+            # ------------------------------------------------
 
-        for event in events:
-            self._record_and_publish(
-                event
-            )
+            if was_unavailable:
+                events.insert(
+                    0,
+                    StatusEvent(
+                        type="source_recovered",
+                        source=source,
+                        data={
+                            "source": source,
+                            "latency_ms": elapsed_ms,
+                        },
+                        importance="normal",
+                        identity=(
+                            f"{source}:recovered"
+                        ),
+                    ),
+                )
 
-        return events
+            # ------------------------------------------------
+            # Publish.
+            # ------------------------------------------------
+
+            for event in events:
+                self._record_and_publish(
+                    event
+                )
+
+            return events
+
+        finally:
+            refresh_lock.release()
 
     # ========================================================
     # SOURCE FAILURE
@@ -709,6 +1185,8 @@ class StatusWorker:
         source: str,
         exc: Exception,
         now: datetime,
+        *,
+        latency_ms: float | None = None,
     ) -> list[StatusEvent]:
         with self._lock:
             was_unavailable = (
@@ -728,6 +1206,22 @@ class StatusWorker:
                 "unavailable"
             )
 
+            health = self._health.setdefault(
+                source,
+                SourceHealth(),
+            )
+
+            health.status = "unavailable"
+            health.updated_at = _timestamp(
+                now
+            )
+            health.last_failure_at = _timestamp(
+                now
+            )
+            health.latency_ms = latency_ms
+            health.failure_count += 1
+            health.error = str(exc)
+
         # Keep the last valid state intact.
         self._set_source(
             source,
@@ -736,10 +1230,11 @@ class StatusWorker:
             str(exc),
         )
 
-        print(
-            "[STATUS] "
-            f"{source} unavailable: "
-            f"{type(exc).__name__}: {exc}"
+        logger.warning(
+            "Status source %s unavailable: %s: %s",
+            source,
+            type(exc).__name__,
+            exc,
         )
 
         # Do not repeatedly emit the same failure.
@@ -752,6 +1247,8 @@ class StatusWorker:
             data={
                 "source": source,
                 "error": str(exc),
+                "error_type": type(exc).__name__,
+                "latency_ms": latency_ms,
             },
             importance="normal",
             identity=(
@@ -776,6 +1273,13 @@ class StatusWorker:
         status: str,
         error: str = "",
     ) -> None:
+        """
+        Update source state.
+
+        This retains compatibility with the current StatusState
+        implementation by using its existing internal lock.
+        """
+
         with self.state._lock:
             source_state: dict[
                 str,
@@ -799,12 +1303,24 @@ class StatusWorker:
 
             if source == "calendar":
                 self._set_calendar_state(
-                    value
+                    value,
+                    self.state.timestamp_datetime
+                    if hasattr(
+                        self.state,
+                        "timestamp_datetime",
+                    )
+                    else self.now(),
                 )
 
             elif source == "tasks":
                 self._set_task_state(
-                    value
+                    value,
+                    self.state.timestamp_datetime
+                    if hasattr(
+                        self.state,
+                        "timestamp_datetime",
+                    )
+                    else self.now(),
                 )
 
             elif source == "mail":
@@ -842,15 +1358,21 @@ class StatusWorker:
                     else {}
                 )
 
+    # ========================================================
+    # CALENDAR STATE
+    # ========================================================
+
     def _set_calendar_state(
         self,
         value: Any,
+        now: datetime | None = None,
     ) -> None:
         events = _items(value)
 
-        # State timestamp is already available, but parsing uses
-        # the current runtime clock.
-        now = self.now()
+        current_now = (
+            now
+            or self.now()
+        )
 
         def event_sort_key(
             event: dict[str, Any],
@@ -858,14 +1380,12 @@ class StatusWorker:
             parsed = _parse_datetime(
                 event.get("datetime")
                 or event.get("start"),
-                now,
+                current_now,
             )
 
             if parsed is not None:
                 return parsed
 
-            # Make this comparable with both UTC and local aware
-            # datetimes.
             return datetime.max.replace(
                 tzinfo=timezone.utc
             )
@@ -882,20 +1402,47 @@ class StatusWorker:
             "events": events
         }
 
+        # ----------------------------------------------------
+        # next_event must be a future event.
+        # ----------------------------------------------------
+
+        next_event = None
+
+        for event in events:
+            start = _parse_datetime(
+                event.get("datetime")
+                or event.get("start"),
+                current_now,
+            )
+
+            if start is None:
+                continue
+
+            if start >= current_now:
+                next_event = event
+                break
+
         self.state.next_event = (
-            deepcopy(events[0])
-            if events
+            deepcopy(next_event)
+            if next_event is not None
             else None
         )
+
+    # ========================================================
+    # TASK STATE
+    # ========================================================
 
     def _set_task_state(
         self,
         value: Any,
+        now: datetime | None = None,
     ) -> None:
         tasks = _items(value)
 
-        # Calculate overdue state from one clock value.
-        now = self.now()
+        current_now = (
+            now
+            or self.now()
+        )
 
         self.state.tasks = deepcopy(
             tasks
@@ -911,7 +1458,7 @@ class StatusWorker:
 
             if self._task_is_overdue(
                 task,
-                now=now,
+                now=current_now,
             ):
                 overdue.append(
                     deepcopy(task)
@@ -919,23 +1466,16 @@ class StatusWorker:
 
         self.state.overdue_tasks = overdue
 
+    # ========================================================
+    # MAIL STATE
+    # ========================================================
+
     def _set_mail_state(
         self,
         value: Any,
     ) -> None:
         """
         Normalize Gmail provider output into StatusState.mail.
-
-        The Gmail provider returns:
-
-            {
-                "success": bool,
-                "count": int,
-                "emails": [...]
-            }
-
-        Keep the provider's useful metadata while also exposing
-        a convenient unread count for the Brain/UI.
         """
 
         if not isinstance(
@@ -943,7 +1483,6 @@ class StatusWorker:
             dict,
         ):
             self.state.mail = {}
-
             return
 
         emails = value.get(
@@ -985,8 +1524,7 @@ class StatusWorker:
 
             "count": len(emails),
 
-            "unread_count":
-                unread_count,
+            "unread_count": unread_count,
 
             "emails": emails,
 
@@ -1010,16 +1548,6 @@ class StatusWorker:
         new: Any,
         now: datetime,
     ) -> list[StatusEvent]:
-        """
-        Detect both structural changes and time-based conditions.
-
-        Temporal conditions are deliberately evaluated on every
-        successful refresh.
-
-        This is critical for reminders because time can pass without
-        the provider's returned data changing.
-        """
-
         if source == "calendar":
             return self._calendar_events(
                 old,
@@ -1083,7 +1611,7 @@ class StatusWorker:
         result: list[StatusEvent] = []
 
         # ----------------------------------------------------
-        # Structural changes
+        # Added
         # ----------------------------------------------------
 
         for key, item in after.items():
@@ -1100,6 +1628,10 @@ class StatusWorker:
                     )
                 )
 
+        # ----------------------------------------------------
+        # Removed
+        # ----------------------------------------------------
+
         for key, item in before.items():
             if key not in after:
                 result.append(
@@ -1113,6 +1645,10 @@ class StatusWorker:
                         ),
                     )
                 )
+
+        # ----------------------------------------------------
+        # Changed
+        # ----------------------------------------------------
 
         for key in (
             after.keys()
@@ -1134,11 +1670,9 @@ class StatusWorker:
                 )
 
         # ----------------------------------------------------
-        # Temporal reminders
+        # Temporal reminders.
         #
-        # IMPORTANT:
-        # This runs every calendar refresh even if the provider
-        # returned exactly the same data.
+        # Evaluated on every successful refresh.
         # ----------------------------------------------------
 
         result.extend(
@@ -1147,11 +1681,6 @@ class StatusWorker:
                 now,
             )
         )
-
-        # ----------------------------------------------------
-        # Remove reminder markers for events that no longer
-        # exist or whose occurrence changed.
-        # ----------------------------------------------------
 
         self._prune_calendar_markers(
             after
@@ -1224,6 +1753,21 @@ class StatusWorker:
             occurrence,
             event,
         ) in candidates:
+
+            # ------------------------------------------------
+            # Correct threshold selection.
+            #
+            # Example:
+            #
+            # 59 min -> 60 threshold
+            # 29 min -> 30 threshold
+            # 14 min -> 15 threshold
+            # 4 min  -> 5 threshold
+            #
+            # We need the LARGEST threshold that the current
+            # time has crossed, not the smallest.
+            # ------------------------------------------------
+
             eligible = [
                 threshold
                 for threshold
@@ -1234,7 +1778,7 @@ class StatusWorker:
             if not eligible:
                 continue
 
-            threshold = min(
+            threshold = max(
                 eligible
             )
 
@@ -1245,12 +1789,19 @@ class StatusWorker:
                 threshold,
             )
 
-            if marker in self._thresholds_fired:
-                continue
+            with self._lock:
+                already_fired = (
+                    marker
+                    in self._thresholds_fired
+                )
 
-            self._thresholds_fired.add(
-                marker
-            )
+                if not already_fired:
+                    self._thresholds_fired.add(
+                        marker
+                    )
+
+            if already_fired:
+                continue
 
             result.append(
                 StatusEvent(
@@ -1329,10 +1880,6 @@ class StatusWorker:
 
         result: list[StatusEvent] = []
 
-        # ----------------------------------------------------
-        # Added
-        # ----------------------------------------------------
-
         for key, item in after.items():
             if key not in before:
                 result.append(
@@ -1347,10 +1894,6 @@ class StatusWorker:
                     )
                 )
 
-        # ----------------------------------------------------
-        # Removed
-        # ----------------------------------------------------
-
         for key, item in before.items():
             if key not in after:
                 result.append(
@@ -1364,10 +1907,6 @@ class StatusWorker:
                         ),
                     )
                 )
-
-        # ----------------------------------------------------
-        # Existing task changes
-        # ----------------------------------------------------
 
         for key in (
             after.keys()
@@ -1390,7 +1929,7 @@ class StatusWorker:
                         importance="normal",
                         identity=(
                             f"{key}:"
-                            f"task_completed"
+                            "task_completed"
                         ),
                     )
                 )
@@ -1412,10 +1951,6 @@ class StatusWorker:
                         ),
                     )
                 )
-
-        # ----------------------------------------------------
-        # Temporal task events
-        # ----------------------------------------------------
 
         result.extend(
             self._task_due_events(
@@ -1527,13 +2062,18 @@ class StatusWorker:
                     0,
                 )
 
-                if marker not in (
-                    self._thresholds_fired
-                ):
-                    self._thresholds_fired.add(
+                with self._lock:
+                    already_fired = (
                         marker
+                        in self._thresholds_fired
                     )
 
+                    if not already_fired:
+                        self._thresholds_fired.add(
+                            marker
+                        )
+
+                if not already_fired:
                     result.append(
                         StatusEvent(
                             type="task_due",
@@ -1548,13 +2088,13 @@ class StatusWorker:
                             identity=(
                                 f"{key}:"
                                 f"{due_identity}:"
-                                f"task_due"
+                                "task_due"
                             ),
                         )
                     )
 
             # ------------------------------------------------
-            # Overdue after grace period
+            # Overdue after grace.
             # ------------------------------------------------
 
             if (
@@ -1568,13 +2108,18 @@ class StatusWorker:
                     -TASK_OVERDUE_GRACE_MINUTES,
                 )
 
-                if marker not in (
-                    self._thresholds_fired
-                ):
-                    self._thresholds_fired.add(
+                with self._lock:
+                    already_fired = (
                         marker
+                        in self._thresholds_fired
                     )
 
+                    if not already_fired:
+                        self._thresholds_fired.add(
+                            marker
+                        )
+
+                if not already_fired:
                     result.append(
                         StatusEvent(
                             type="task_overdue",
@@ -1591,7 +2136,7 @@ class StatusWorker:
                             identity=(
                                 f"{key}:"
                                 f"{due_identity}:"
-                                f"task_overdue"
+                                "task_overdue"
                             ),
                         )
                     )
@@ -1644,18 +2189,14 @@ class StatusWorker:
         """
         Detect Gmail changes.
 
-        The current Gmail provider returns a recent-message
-        window rather than a complete mailbox snapshot.
+        Gmail currently returns a recent-message window rather
+        than a complete mailbox snapshot.
 
         Therefore:
 
           - new IDs are treated as newly observed emails
-          - unread-state changes are detected
+          - unread transitions are detected
           - disappearing messages are NOT treated as deleted
-
-        This prevents false "email removed" notifications when
-        an older message simply falls outside the provider's
-        recent-results window.
         """
 
         if not isinstance(
@@ -1714,14 +2255,8 @@ class StatusWorker:
 
         result: list[StatusEvent] = []
 
-        # ----------------------------------------------------
-        # New emails
-        # ----------------------------------------------------
-
         for key, email in after.items():
-
             if key not in before:
-
                 result.append(
                     StatusEvent(
                         type="email_received",
@@ -1744,10 +2279,6 @@ class StatusWorker:
                     )
                 )
 
-        # ----------------------------------------------------
-        # Existing email changes
-        # ----------------------------------------------------
-
         for key in (
             after.keys()
             & before.keys()
@@ -1769,10 +2300,6 @@ class StatusWorker:
                 )
             )
 
-            # ------------------------------------------------
-            # Read -> unread
-            # ------------------------------------------------
-
             if (
                 not old_unread
                 and new_unread
@@ -1792,10 +2319,6 @@ class StatusWorker:
                     )
                 )
 
-            # ------------------------------------------------
-            # Other metadata change
-            # ------------------------------------------------
-
             elif (
                 old_email
                 != new_email
@@ -1814,10 +2337,6 @@ class StatusWorker:
                         ),
                     )
                 )
-
-        # ----------------------------------------------------
-        # Aggregate unread-count change
-        # ----------------------------------------------------
 
         old_unread_count = sum(
             1
@@ -1848,33 +2367,30 @@ class StatusWorker:
         if (
             old_unread_count
             != new_unread_count
-        ):
-            # Do not emit a second generic event if we already
-            # emitted specific email_unread events. The specific
-            # event carries better information for the Brain.
-            if not any(
+            and not any(
                 event.type
                 == "email_unread"
                 for event in result
-            ):
-                result.append(
-                    StatusEvent(
-                        type="email_unread_count_changed",
-                        source="mail",
-                        data={
-                            "old_unread_count":
-                                old_unread_count,
+            )
+        ):
+            result.append(
+                StatusEvent(
+                    type="email_unread_count_changed",
+                    source="mail",
+                    data={
+                        "old_unread_count":
+                            old_unread_count,
 
-                            "new_unread_count":
-                                new_unread_count,
-                        },
-                        importance="normal",
-                        identity=(
-                            "mail:"
-                            "unread_count_changed"
-                        ),
-                    )
+                        "new_unread_count":
+                            new_unread_count,
+                    },
+                    importance="normal",
+                    identity=(
+                        "mail:"
+                        "unread_count_changed"
+                    ),
                 )
+            )
 
         return result
 
@@ -2007,7 +2523,7 @@ class StatusWorker:
                     importance="low",
                     identity=(
                         "spotify:"
-                        f"track_changed:"
+                        "track_changed:"
                         f"{new_item}"
                     ),
                 )
@@ -2075,7 +2591,7 @@ class StatusWorker:
         )
 
         # ----------------------------------------------------
-        # Memory
+        # Memory high alert.
         # ----------------------------------------------------
 
         if (
@@ -2083,15 +2599,12 @@ class StatusWorker:
                 new_memory,
                 (int, float),
             )
-            and new_memory >= 90
-            and (
-                not isinstance(
-                    old_memory,
-                    (int, float),
-                )
-                or old_memory < 90
-            )
+            and new_memory
+            >= SYSTEM_MEMORY_HIGH_THRESHOLD
+            and not self._memory_high
         ):
+            self._memory_high = True
+
             events.append(
                 StatusEvent(
                     type="system_memory_high",
@@ -2105,8 +2618,32 @@ class StatusWorker:
                 )
             )
 
+        elif (
+            isinstance(
+                new_memory,
+                (int, float),
+            )
+            and new_memory
+            <= SYSTEM_MEMORY_RECOVERY_THRESHOLD
+            and self._memory_high
+        ):
+            self._memory_high = False
+
+            events.append(
+                StatusEvent(
+                    type="system_memory_recovered",
+                    source="system",
+                    data=deepcopy(new),
+                    importance="normal",
+                    identity=(
+                        "system:"
+                        "memory_recovered"
+                    ),
+                )
+            )
+
         # ----------------------------------------------------
-        # Disk
+        # Disk high alert.
         # ----------------------------------------------------
 
         if (
@@ -2114,15 +2651,12 @@ class StatusWorker:
                 new_disk,
                 (int, float),
             )
-            and new_disk >= 90
-            and (
-                not isinstance(
-                    old_disk,
-                    (int, float),
-                )
-                or old_disk < 90
-            )
+            and new_disk
+            >= SYSTEM_DISK_HIGH_THRESHOLD
+            and not self._disk_high
         ):
+            self._disk_high = True
+
             events.append(
                 StatusEvent(
                     type="system_disk_high",
@@ -2132,6 +2666,30 @@ class StatusWorker:
                     identity=(
                         "system:"
                         "disk_high"
+                    ),
+                )
+            )
+
+        elif (
+            isinstance(
+                new_disk,
+                (int, float),
+            )
+            and new_disk
+            <= SYSTEM_DISK_RECOVERY_THRESHOLD
+            and self._disk_high
+        ):
+            self._disk_high = False
+
+            events.append(
+                StatusEvent(
+                    type="system_disk_recovered",
+                    source="system",
+                    data=deepcopy(new),
+                    importance="normal",
+                    identity=(
+                        "system:"
+                        "disk_recovered"
                     ),
                 )
             )
@@ -2146,18 +2704,30 @@ class StatusWorker:
         self,
         event: StatusEvent,
     ) -> None:
-        self.state.append_change(
-            event.to_dict(),
-            limit=self.recent_change_limit,
+        try:
+            self.state.append_change(
+                event.to_dict(),
+                limit=self.recent_change_limit,
+            )
+        except Exception:
+            logger.exception(
+                "Failed to record status event %s",
+                event.type,
+            )
+
+        logger.info(
+            "Status event: type=%s source=%s importance=%s",
+            event.type,
+            event.source,
+            event.importance,
         )
 
-        print(
-            "[STATUS] "
-            "Change detected "
-            f"type={event.type} "
-            f"source={event.source}"
-        )
-
-        self.event_bus.publish(
-            event
-        )
+        try:
+            self.event_bus.publish(
+                event
+            )
+        except Exception:
+            logger.exception(
+                "Failed to publish status event %s",
+                event.type,
+            )

@@ -7,12 +7,12 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
-from backend.functions.project_creator.languages.python import create_py_project
-from backend.functions.project_creator.languages.react import create_react_project
-from backend.functions.project_creator.languages.rust import create_rust_project
-from backend.functions.project_creator.languages.tauri import create_tauri_project
-from backend.functions.project_creator.languages.cpp import create_cpp_project
-from backend.functions.project_creator.languages.reactnative import (
+from backend.tools.project_creator.languages.python import create_py_project
+from backend.tools.project_creator.languages.react import create_react_project
+from backend.tools.project_creator.languages.rust import create_rust_project
+from backend.tools.project_creator.languages.tauri import create_tauri_project
+from backend.tools.project_creator.languages.cpp import create_cpp_project
+from backend.tools.project_creator.languages.reactnative import (
     create_reactnative_project,
 )
 

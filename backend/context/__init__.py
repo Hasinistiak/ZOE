@@ -21,11 +21,7 @@ USER_FILE = CONTEXT_DIR / "User.md"
 # ============================================================
 
 def _read_file(path: Path) -> str:
-    """
-    Read a context markdown file.
 
-    Missing or unreadable files return an empty string.
-    """
 
     try:
         return path.read_text(
@@ -41,38 +37,19 @@ def _read_file(path: Path) -> str:
 # ============================================================
 
 def get_identity() -> str:
-    """
-    Load ZOE's identity from Identity.md.
 
-    This function performs a direct file read.
-
-    Session-level caching is handled by ContextEngine.
-    """
 
     return _read_file(IDENTITY_FILE)
 
 
 def get_soul() -> str:
-    """
-    Load ZOE's behavioral and personality definition
-    from Soul.md.
 
-    This function performs a direct file read.
-
-    Session-level caching is handled by ContextEngine.
-    """
 
     return _read_file(SOUL_FILE)
 
 
 def get_user_context() -> str:
-    """
-    Load stable user context from User.md.
 
-    This function performs a direct file read.
-
-    Session-level caching is handled by ContextEngine.
-    """
 
     return _read_file(USER_FILE)
 
@@ -83,26 +60,6 @@ def get_user_context() -> str:
 
 @dataclass
 class ContextPackage:
-    """
-    Context gathered for a single Brain invocation.
-
-    Static session context:
-        identity
-        soul
-        user
-
-    Dynamic invocation context:
-        status
-        session
-        memories
-
-    Identity, Soul, and User are loaded once by the
-    ContextEngine and reused for the lifetime of the engine.
-
-    Memory retrieval is intentionally outside this class.
-    The Brain decides whether memory is necessary and,
-    if so, supplies the retrieved memories here.
-    """
 
     # --------------------------------------------------------
     # STATIC SESSION CONTEXT
@@ -126,18 +83,11 @@ class ContextPackage:
         default_factory=list
     )
 
-    memories: list[dict[str, Any]] = field(
-        default_factory=list
-    )
-
     # --------------------------------------------------------
     # SERIALIZATION
     # --------------------------------------------------------
 
     def to_dict(self) -> dict[str, Any]:
-        """
-        Convert the package into a plain dictionary.
-        """
 
         return {
             "identity": self.identity,
@@ -145,7 +95,6 @@ class ContextPackage:
             "user": self.user,
             "status": self.status,
             "session": self.session,
-            "memories": self.memories,
         }
 
 
@@ -154,51 +103,13 @@ class ContextPackage:
 # ============================================================
 
 class ContextEngine:
-    """
-    Session-level context manager for ZOE.
-
-    The ContextEngine owns the lifecycle of static context:
-
-        Identity.md
-        Soul.md
-        User.md
-
-    All three are loaded exactly once when the engine is
-    initialized.
-
-    They remain cached for the lifetime of this engine.
-
-    Dynamic context is assembled separately for each Brain
-    invocation:
-
-        status
-        session
-        memories
-
-    The ContextEngine does NOT:
-
-        - decide actions
-        - decide whether memory is needed
-        - retrieve memories
-        - search knowledge
-        - execute agents
-        - execute tools
-        - manage conversation logic
-        - call an LLM
-    """
 
     # ========================================================
     # INITIALIZATION
     # ========================================================
 
     def __init__(self) -> None:
-        """
-        Create a session-level context engine.
 
-        Identity, Soul, and User are loaded once here.
-
-        They are deliberately NOT re-read on every build().
-        """
 
         self._identity: str = get_identity()
         self._soul: str = get_soul()
@@ -213,18 +124,8 @@ class ContextEngine:
         message: str,
         session: list[dict[str, str]] | None = None,
         status: dict[str, Any] | None = None,
-        memories: list[dict[str, Any]] | None = None,
     ) -> ContextPackage:
-        """
-        Build the context package for one Brain invocation.
 
-        Static context comes from the session-level cache.
-
-        Dynamic context is normalized for this invocation.
-
-        `memories` is optional because memory retrieval is
-        controlled by the Brain rather than the ContextEngine.
-        """
 
         if not message or not message.strip():
             raise ValueError(
@@ -237,7 +138,6 @@ class ContextEngine:
             user=self._user,
             status=self._get_status(status),
             session=self._get_session(session or []),
-            memories=self._get_memories(memories or []),
         )
 
     # ========================================================
@@ -246,31 +146,19 @@ class ContextEngine:
 
     @property
     def identity(self) -> str:
-        """
-        Cached Identity.md contents.
 
-        No file read occurs here.
-        """
 
         return self._identity
 
     @property
     def soul(self) -> str:
-        """
-        Cached Soul.md contents.
 
-        No file read occurs here.
-        """
 
         return self._soul
 
     @property
     def user(self) -> str:
-        """
-        Cached User.md contents.
 
-        No file read occurs here.
-        """
 
         return self._user
 
@@ -279,15 +167,7 @@ class ContextEngine:
     # ========================================================
 
     def reload(self) -> None:
-        """
-        Explicitly reload all session-level static context.
 
-        Normally this should NOT be called during a normal
-        conversation.
-
-        It exists for development tools, configuration reloads,
-        or starting a deliberately refreshed context session.
-        """
 
         self._identity = get_identity()
         self._soul = get_soul()
@@ -301,11 +181,7 @@ class ContextEngine:
     def _get_status(
         status: dict[str, Any] | None,
     ) -> dict[str, Any]:
-        """
-        Normalize dynamic runtime status.
 
-        Status is invocation-specific and therefore is NOT cached.
-        """
 
         if not isinstance(status, dict):
             return {}
@@ -320,18 +196,14 @@ class ContextEngine:
     def _get_session(
         session: list[dict[str, str]],
     ) -> list[dict[str, str]]:
-        """
-        Normalize conversational history.
 
-        Only the most recent 10 valid messages are retained.
-
-        Session itself remains dynamic and is never cached by
-        ContextEngine.
-        """
 
         clean: list[dict[str, str]] = []
 
-        for message in session[-10:]:
+        if not isinstance(session, list):
+            return []
+
+        for message in session:
 
             if not isinstance(message, dict):
                 continue
@@ -365,33 +237,8 @@ class ContextEngine:
                 }
             )
 
-        return clean
-
-    # ========================================================
-    # MEMORIES
-    # ========================================================
-
-    @staticmethod
-    def _get_memories(
-        memories: list[dict[str, Any]],
-    ) -> list[dict[str, Any]]:
-        """
-        Normalize retrieved memory data.
-
-        Memory retrieval itself belongs to the Brain/memory
-        subsystem. ContextEngine only packages the result.
-
-        Memories are invocation-specific and are never cached.
-        """
-
-        if not isinstance(memories, list):
-            return []
-
-        return [
-            memory
-            for memory in memories
-            if isinstance(memory, dict)
-        ]
+        # Keep the 10 most recent VALID messages.
+        return clean[-10:]
 
 
 # ============================================================
@@ -399,15 +246,7 @@ class ContextEngine:
 # ============================================================
 
 def create_context_engine() -> ContextEngine:
-    """
-    Create a new session-level ContextEngine.
 
-    Creating a new engine starts a new static-context lifecycle:
-
-        Identity → loaded
-        Soul     → loaded
-        User     → loaded
-    """
 
     return ContextEngine()
 

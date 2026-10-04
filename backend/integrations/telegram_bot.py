@@ -12,6 +12,7 @@ from typing import Optional
 
 from dotenv import load_dotenv
 from telegram import Update
+from telegram.error import NetworkError
 from telegram.ext import (
     Application,
     CommandHandler,
@@ -110,15 +111,18 @@ TELEGRAM_VOICE_FFMPEG = (
     or "ffmpeg"
 )
 
-TELEGRAM_VOICE_TIMEOUT = max(
-    10.0,
-    float(
-        os.getenv(
-            "TELEGRAM_VOICE_TIMEOUT",
-            "120",
-        )
-    ),
-)
+try:
+    TELEGRAM_VOICE_TIMEOUT = max(
+        10.0,
+        float(
+            os.getenv(
+                "TELEGRAM_VOICE_TIMEOUT",
+                "120",
+            )
+        ),
+    )
+except (TypeError, ValueError):
+    TELEGRAM_VOICE_TIMEOUT = 120.0
 
 
 # ============================================================
@@ -159,6 +163,26 @@ PROACTIVE_OUTPUT_TYPES = {
 
 LOGGER = logging.getLogger(
     "zoe.telegram"
+)
+
+# python-telegram-bot uses its own loggers for the updater,
+# polling loop, request layer, etc.
+#
+# Network failures during polling are recoverable because
+# python-telegram-bot already has an internal retry loop.
+#
+# The Updater logger previously produced large ERROR tracebacks
+# for transient DNS/network failures. Keep the logger visible
+# but lower it to WARNING so recoverable polling failures do
+# not look like a ZOE crash.
+#
+# We still keep the actual ZOE Telegram logger at INFO.
+PTB_UPDATER_LOGGER = logging.getLogger(
+    "telegram.ext.Updater"
+)
+
+PTB_UPDATER_LOGGER.setLevel(
+    logging.WARNING
 )
 
 
@@ -331,10 +355,35 @@ async def _reply(
         text
     )
 
+    if not chunks:
+        return
+
     for chunk in chunks:
-        await message.reply_text(
-            chunk
-        )
+
+        try:
+            await message.reply_text(
+                chunk
+            )
+
+        except NetworkError as exc:
+
+            LOGGER.warning(
+                "Telegram reply temporarily "
+                "failed due to network error; "
+                "polling will retry automatically. "
+                "error=%s",
+                exc,
+            )
+
+            return
+
+        except Exception:
+
+            LOGGER.exception(
+                "Failed to send Telegram reply."
+            )
+
+            return
 
 
 # ============================================================
@@ -358,10 +407,12 @@ def _wav_to_ogg(
     )
 
     if ffmpeg is None:
+
         LOGGER.error(
             "FFmpeg was not found. "
             "Telegram voice messages require FFmpeg."
         )
+
         return None
 
     fd, ogg_path = tempfile.mkstemp(
@@ -390,6 +441,7 @@ def _wav_to_ogg(
     ]
 
     try:
+
         result = subprocess.run(
             command,
             stdout=subprocess.DEVNULL,
@@ -482,9 +534,11 @@ def _generate_telegram_voice(
         )
 
         if not wav_path:
+
             LOGGER.warning(
                 "PocketTTS produced no voice file."
             )
+
             return None
 
         ogg_path = _wav_to_ogg(
@@ -503,6 +557,7 @@ def _generate_telegram_voice(
         )
 
         if ogg_path:
+
             try:
                 os.remove(
                     ogg_path
@@ -515,6 +570,7 @@ def _generate_telegram_voice(
     finally:
 
         if wav_path:
+
             try:
                 os.remove(
                     wav_path
@@ -543,8 +599,10 @@ async def _start_command(
         )
 
         if message is not None:
-            await message.reply_text(
-                "Access denied."
+
+            await _reply(
+                update,
+                "Access denied.",
             )
 
         return
@@ -845,6 +903,7 @@ async def _send_message_async(
 ) -> bool:
 
     with _bot_state_lock:
+
         application = (
             _bot_application
         )
@@ -879,6 +938,16 @@ async def _send_message_async(
 
         return True
 
+    except NetworkError as exc:
+
+        LOGGER.warning(
+            "Telegram message temporarily "
+            "could not be delivered: %s",
+            exc,
+        )
+
+        return False
+
     except Exception:
 
         LOGGER.exception(
@@ -905,6 +974,7 @@ def send_telegram_message(
         return False
 
     with _bot_state_lock:
+
         loop = _bot_loop
 
     if (
@@ -934,10 +1004,22 @@ def send_telegram_message(
             )
         )
 
-    except Exception:
+    except NetworkError as exc:
 
-        LOGGER.exception(
-            "Telegram outbound message failed."
+        LOGGER.warning(
+            "Telegram outbound message "
+            "temporarily failed: %s",
+            exc,
+        )
+
+        return False
+
+    except Exception as exc:
+
+        LOGGER.warning(
+            "Telegram outbound message failed: "
+            "%s",
+            exc,
         )
 
         return False
@@ -955,6 +1037,7 @@ async def _send_voice_async(
         return False
 
     with _bot_state_lock:
+
         application = (
             _bot_application
         )
@@ -998,6 +1081,16 @@ async def _send_voice_async(
         )
 
         return True
+
+    except NetworkError as exc:
+
+        LOGGER.warning(
+            "Telegram voice temporarily "
+            "could not be delivered: %s",
+            exc,
+        )
+
+        return False
 
     except Exception:
 
@@ -1045,6 +1138,7 @@ def send_telegram_voice(
         return False
 
     with _bot_state_lock:
+
         loop = _bot_loop
 
     if (
@@ -1074,10 +1168,22 @@ def send_telegram_voice(
             )
         )
 
-    except Exception:
+    except NetworkError as exc:
 
-        LOGGER.exception(
-            "Telegram outbound voice failed."
+        LOGGER.warning(
+            "Telegram outbound voice "
+            "temporarily failed: %s",
+            exc,
+        )
+
+        return False
+
+    except Exception as exc:
+
+        LOGGER.warning(
+            "Telegram outbound voice failed: "
+            "%s",
+            exc,
         )
 
         return False
@@ -1153,7 +1259,7 @@ async def _message_handler(
                 response_text[:200],
             )
 
-            # Always send text.
+            # Always send text first.
             await _reply(
                 update,
                 response_text,
@@ -1291,9 +1397,6 @@ async def _voice_message_handler(
         # ====================================================
         # IMPORTANT:
         # DO NOT SEND THE TRANSCRIPT BACK TO TELEGRAM.
-        #
-        # The transcript is internal and goes directly
-        # into ZOE.
         # ====================================================
 
         LOGGER.info(
@@ -1354,6 +1457,14 @@ async def _voice_message_handler(
                     "Telegram VM voice response failed."
                 )
 
+    except NetworkError as exc:
+
+        LOGGER.warning(
+            "Telegram voice request temporarily "
+            "failed because of a network problem: %s",
+            exc,
+        )
+
     except Exception as exc:
 
         LOGGER.exception(
@@ -1391,10 +1502,44 @@ async def _error_handler(
     context: ContextTypes.DEFAULT_TYPE,
 ) -> None:
 
+    error = context.error
+
+    if error is None:
+        return
+
+    # --------------------------------------------------------
+    # Recoverable Telegram network problem
+    # --------------------------------------------------------
+    #
+    # python-telegram-bot's updater has its own retry loop.
+    # Do NOT restart the bot here.
+    #
+    # This handles errors delivered through PTB's application
+    # error handler and keeps them concise.
+    # --------------------------------------------------------
+
+    if isinstance(
+        error,
+        NetworkError,
+    ):
+
+        LOGGER.warning(
+            "Telegram network connection temporarily "
+            "unavailable; polling will retry automatically. "
+            "error=%s",
+            error,
+        )
+
+        return
+
+    # --------------------------------------------------------
+    # Real application error
+    # --------------------------------------------------------
+
     LOGGER.error(
         "Telegram error: %s",
-        context.error,
-        exc_info=context.error,
+        error,
+        exc_info=error,
     )
 
 

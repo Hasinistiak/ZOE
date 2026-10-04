@@ -7,7 +7,7 @@ from typing import Any
 from dotenv import load_dotenv
 from groq import Groq
 
-from backend.functions.mail import check_emails
+from backend.tools.mail import check_emails
 
 
 # ============================================================
