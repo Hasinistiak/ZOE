@@ -80,7 +80,7 @@ CORS(
 
 SSE_HEARTBEAT_SECONDS = 15
 
-SERVICE_NAME = "ZOE MARK 34"
+SERVICE_NAME = "ZOE MARK 35"
 
 FRONTEND_URL = "https://zoe.local:5173"
 
@@ -569,9 +569,11 @@ def _build_state_snapshot() -> dict:
 
     The Flask layer enriches that snapshot with
     STT/runtime/status/Telegram information if necessary.
-    """
 
-    runtime_snapshot = _safe_runtime_snapshot()
+    The runtime snapshot is only built here when the
+    canonical snapshot does not already contain one, so a
+    normal request builds it exactly once.
+    """
 
     # ========================================================
     # CANONICAL ZOE SNAPSHOT
@@ -601,18 +603,13 @@ def _build_state_snapshot() -> dict:
         # Runtime
         # ----------------------------------------------------
 
-        snapshot.setdefault(
-            "runtime",
-            runtime_snapshot,
-        )
-
         runtime = snapshot.get("runtime")
 
         if not isinstance(runtime, dict):
 
-            snapshot["runtime"] = runtime_snapshot
+            runtime = _safe_runtime_snapshot()
 
-            runtime = runtime_snapshot
+            snapshot["runtime"] = runtime
 
         # ----------------------------------------------------
         # Activity
@@ -692,7 +689,7 @@ def _build_state_snapshot() -> dict:
     # ========================================================
 
     return _build_fallback_state_snapshot(
-        runtime_snapshot
+        _safe_runtime_snapshot()
     )
 
 
@@ -824,6 +821,12 @@ def _sse_encode(
 ) -> str:
     """
     Convert a runtime event into an SSE message.
+
+    Compact JSON never contains a raw newline, so the payload
+    is always emitted as a single "data:" line. Splitting it
+    with splitlines() could break on characters such as U+2028
+    that are legal inside JSON strings but are not SSE line
+    terminators.
     """
 
     if not isinstance(event, dict):
@@ -850,6 +853,7 @@ def _sse_encode(
                 ",",
                 ":",
             ),
+            default=str,
         )
 
     except Exception as exc:
@@ -874,11 +878,9 @@ def _sse_encode(
             f"id: {event_id}"
         )
 
-    for line in payload.splitlines():
-
-        lines.append(
-            f"data: {line}"
-        )
+    lines.append(
+        f"data: {payload}"
+    )
 
     lines.append("")
 

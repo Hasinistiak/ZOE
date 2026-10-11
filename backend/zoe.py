@@ -1,4 +1,3 @@
-
 from __future__ import annotations
 
 import os
@@ -10,27 +9,12 @@ from typing import Any, Callable
 
 from dotenv import load_dotenv
 
-from backend.execution.zoe_runtime import (
-    create_zoe_runtime,
-)
-
-from backend.speech.tts import (
-    preload,
-    speak_async,
-    stop as stop_tts,
-    is_speaking,
-)
-
-from backend.speech.stt import (
-    start as stt_start,
-    stop as stt_stop,
-    set_speaking as stt_set_speaking,
-    set_muted as stt_set_muted,
-)
-
 
 # ============================================================
 # ENVIRONMENT
+#
+# Must run BEFORE importing backend modules, because they may
+# read environment variables at import time.
 # ============================================================
 
 load_dotenv(
@@ -38,6 +22,25 @@ load_dotenv(
         os.path.dirname(__file__),
         ".env",
     )
+)
+
+
+from backend.execution.zoe_runtime import (  # noqa: E402
+    create_zoe_runtime,
+)
+
+from backend.speech.tts import (  # noqa: E402
+    preload,
+    speak_async,
+    stop as stop_tts,
+    is_speaking,
+)
+
+from backend.speech.stt import (  # noqa: E402
+    start as stt_start,
+    stop as stt_stop,
+    set_speaking as stt_set_speaking,
+    set_muted as stt_set_muted,
 )
 
 
@@ -92,7 +95,7 @@ RUNTIME_RESPONSE_TIMEOUT = max(
 
 print()
 print("=" * 60)
-print("                     ZOE MARK 34")
+print("                     ZOE MARK 35")
 print("=" * 60)
 print()
 
@@ -563,6 +566,36 @@ def is_zoe_muted() -> bool:
 
 
 # ============================================================
+# RUNTIME SPEAKING RESET
+#
+# The runtime leaves its SPEAKING state only when the TTS
+# completion callback fires. Whenever speech is cancelled
+# (mute / barge-in) that callback is invalidated, so the
+# runtime must be told explicitly.
+# ============================================================
+
+def _reset_runtime_speaking() -> None:
+
+    rt = runtime
+
+    if rt is None:
+        return
+
+    try:
+
+        rt.set_speaking(
+            False
+        )
+
+    except Exception as exc:
+
+        print(
+            "[ZOE] Runtime speaking reset error:",
+            exc,
+        )
+
+
+# ============================================================
 # WAKE WORD
 # ============================================================
 
@@ -701,6 +734,10 @@ def set_zoe_muted(
             )
 
         clear_zoe_speaking_state()
+
+        # The invalidated TTS callback will never reach the
+        # runtime, so release its SPEAKING state here.
+        _reset_runtime_speaking()
 
         _clear_voice_queue()
 
@@ -870,15 +907,15 @@ def on_user_speech_partial(
     text: str,
 ) -> None:
 
+    global _current_stt_text
+    global _stt_final
+
     if is_zoe_muted():
         return
 
     text = _safe_text(
         text
     )
-
-    global _current_stt_text
-    global _stt_final
 
     with _stt_lock:
 
@@ -1002,10 +1039,24 @@ def zoe_speak_async(
         text
     )
 
-    if not text:
-        return
+    if not text or is_zoe_muted():
 
-    if is_zoe_muted():
+        # The runtime leaves its SPEAKING state only through
+        # on_complete. Dropping it silently would strand the
+        # runtime in "speaking", so complete it immediately.
+        if on_complete is not None:
+
+            try:
+
+                on_complete()
+
+            except Exception as exc:
+
+                print(
+                    "[ZOE TTS] Completion callback "
+                    f"error: {exc}"
+                )
+
         return
 
     # --------------------------------------------------------
@@ -1088,6 +1139,10 @@ def interrupt_zoe() -> None:
 
     clear_zoe_speaking_state()
 
+    # The interrupted utterance's completion callback is now
+    # invalid, so release the runtime's SPEAKING state here.
+    _reset_runtime_speaking()
+
     print(
         "[ZOE] Speech interrupted."
     )
@@ -1128,6 +1183,20 @@ def _speak_runtime_output(
     )
 
     if not text:
+
+        if on_complete is not None:
+
+            try:
+
+                on_complete()
+
+            except Exception as exc:
+
+                print(
+                    "[ZOE TTS] Completion callback "
+                    f"error: {exc}"
+                )
+
         return
 
     zoe_speak_async(
@@ -1328,6 +1397,11 @@ def _initialize_runtime() -> None:
     global runtime
     global _runtime_started
     global _runtime_shutdown
+
+    # Fast path: avoid contending on _runtime_lock (which
+    # start_stt() holds while models load) on every request.
+    if _runtime_started:
+        return
 
     with _runtime_lock:
 
@@ -1899,10 +1973,12 @@ def get_zoe_snapshot() -> dict:
             current_url = runtime_url.strip()
 
     return {
+        # "online" describes the backend runtime only. A failed
+        # microphone must not mark the whole backend offline;
+        # that is reported separately through "stt_status".
         "online": (
             _runtime_started
             and not _runtime_shutdown
-            and not _stt_failed
         ),
 
         "state": get_zoe_state(),
@@ -2104,10 +2180,40 @@ def shutdown_zoe() -> None:
     _runtime_started = False
 
     # --------------------------------------------------------
-    # Remove event subscribers.
+    # Notify and remove event subscribers.
+    #
+    # A None sentinel tells SSE streams to terminate.
     # --------------------------------------------------------
 
     with _runtime_event_lock:
+
+        for subscriber_queue in (
+            _runtime_event_subscribers.values()
+        ):
+
+            try:
+
+                subscriber_queue.put_nowait(
+                    None
+                )
+
+            except queue.Full:
+
+                try:
+
+                    subscriber_queue.get_nowait()
+
+                except queue.Empty:
+                    pass
+
+                try:
+
+                    subscriber_queue.put_nowait(
+                        None
+                    )
+
+                except queue.Full:
+                    pass
 
         _runtime_event_subscribers.clear()
 
@@ -2129,7 +2235,7 @@ def main() -> None:
         print()
         print("=" * 60)
         print(
-            "                    ZOE MARK 34 ONLINE"
+            "                    ZOE MARK 35 ONLINE"
         )
         print("=" * 60)
         print()

@@ -3,7 +3,6 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Callable
 
-import argparse
 import atexit
 import logging
 import os
@@ -527,7 +526,14 @@ def _clean_markdown(text: str) -> str:
     text = re.sub(r"`([^`]+)`", r"\1", text)
     text = re.sub(r"(?m)^\s*#{1,6}\s+", "", text)
     text = re.sub(r"(?m)^\s*[-*•]\s+", "", text)
-    text = text.replace("**", "").replace("__", "").replace("*", "")
+
+    # "3 * 4" / "3*4" is multiplication, not emphasis. Handle it first.
+    text = re.sub(r"(?<=\d)\s?\*\s?(?=\d)", " times ", text)
+
+    # Strip emphasis asterisks only (attached to a word), never a lone " * ".
+    text = text.replace("**", "").replace("__", "")
+    text = re.sub(r"\*+(?=\S)|(?<=\S)\*+", "", text)
+
     # Only strip emphasis underscores. snake_case / emails / URLs keep theirs
     # until they have been handled (final cleanup turns leftovers into spaces).
     text = re.sub(r"(?<!\w)_+|_+(?!\w)", "", text)
@@ -580,29 +586,44 @@ def _replace_urls(text: str) -> str:
     return _URL.sub(replace, text)
 
 
+# Codes are ONLY read digit by digit when a code-like phrase comes right
+# before them ("login code is 125012", "OTP: 4821", "PIN 1234").
+# Group 2 is the connector ("is", ":", ...) and is KEPT in the output.
+# (?!\d) instead of \b so a missing space ("125012The") still matches.
 _SECURITY_CODE = re.compile(
     r"\b("
-    r"security\s+code|verification\s+code|verify\s+code|"
-    r"authentication\s+code|auth\s+code|access\s+code|"
-    r"one[- ]time\s+password|one[- ]time\s+code|otp"
-    r")\s*[:#-]?\s*(\d{4,8})\b",
+    r"(?:security|verification|verify|authentication|auth|access|login|"
+    r"confirmation|reset|activation|sign[- ]?in)\s+code|"
+    r"one[- ]time\s+(?:password|code|passcode)|otp|passcode|pin"
+    r")(\s*(?:(?:is|was)\s*)?[:#-]?\s*)(\d{4,8})(?!\d)",
     re.IGNORECASE,
 )
 
 
 def _replace_security_codes(text: str) -> str:
-    return _SECURITY_CODE.sub(
-        lambda m: f"{m.group(1)} {_spell_digits(m.group(2))}", text
-    )
+
+    def replace(m: re.Match[str]) -> str:
+        gap = m.group(2)
+        if not gap or not gap[-1].isspace():
+            gap += " "
+        return m.group(1) + gap + _spell_digits(m.group(3))
+
+    return _SECURITY_CODE.sub(replace, text)
 
 
 # ---------------------------------------------------------------------------
-# Special words
+# Special words / pronunciation overrides
 # ---------------------------------------------------------------------------
+#
+# Keys MUST be UPPERCASE; matching is case-insensitive ("Hasin", "hasin" and
+# "HASIN" all hit the "HASIN" key). The value is what Pocket TTS will be fed.
+# Tweak the respelling by ear if a name still sounds off.
 
 _ACRONYMS = {
     "ZOE": "Zoe",
     "2FA": "two factor authentication",
+    "HASIN": "Ha-sin",
+    "VS": "versus",
 }
 
 _ACRONYM_PATTERN = re.compile(
@@ -620,32 +641,50 @@ def _replace_acronyms(text: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Acronyms that must be spelled letter by letter
+# Acronyms spelled letter by letter
 # ---------------------------------------------------------------------------
 #
 # Pocket TTS tries to read unknown letter groups as words ("API" -> "epy").
-# These are spaced out so each letter is pronounced: API -> "A P I",
-# APIs -> "A P Is".
+# These are spaced out so each letter is pronounced:
+#   API -> "A P I",  LED -> "L E D",  APIs -> "A P Is"
 #
-# To add one, just add its lowercase form to the right set.
+# To add one, just add it to the right set below.
 
 # Safe in any case: none of these are ordinary English words.
+# (write them lowercase)
 _SPELLED_ANY_CASE = {
-    "api", "cpu", "gpu", "npu", "usb", "hdmi", "ssd", "hdd", "lcd", "gpio",
-    "html", "css", "json", "yaml", "sql", "ssh", "url", "uri", "http",
-    "https", "dns", "vpn", "pdf", "sdk", "cli", "ui", "ux", "tts", "stt",
-    "llm", "ssid", "rtx", "gtx", "oauth", "cors", "ocr", "ide",
+    # computing / hardware
+    "api", "cpu", "gpu", "npu", "tpu", "usb", "hdmi", "ssd", "hdd", "lcd",
+    "oled", "gpio", "nvme", "sata", "wlan", "pcb", "adc", "dac", "pwm",
+    "rgb", "nfc", "gps", "dpi", "ppi", "sms", "mms",
+    # software / web
+    "html", "css", "xml", "csv", "php", "js", "ssh", "ssl", "tls", "tcp",
+    "udp", "url", "uri", "http", "https", "dns", "vpn", "cdn", "mqtt",
+    "pdf", "sdk", "cli", "gui", "ui", "ux", "ide", "jwt", "uuid", "orm",
+    "aws", "esp", "ssid",
+    # AI / speech
+    "tts", "stt", "asr", "llm", "ocr",
+    # graphics cards
+    "rtx", "gtx",
 }
 
 # Only when written in capitals ("OS", "ID"), because "os", "id", "led",
-# "ip" and so on are also ordinary words or fragments.
+# "ip", "us", "hr" and so on are also ordinary words or fragments.
+# (write them UPPERCASE)  "RAM" is intentionally NOT here: people say "ram".
 _SPELLED_UPPER_ONLY = {
-    "AI", "OS", "ID", "PC", "TV", "LED", "IP", "ML", "UK", "US", "RAM",
+    "AI", "OS", "ID", "PC", "TV", "LED", "IP", "ML", "UK", "US", "EU",
+    "UN", "HD", "UV", "AC", "DC", "EV", "VR", "AR", "QA", "PR", "HR",
+    "DIY", "FYI", "CEO", "CTO", "CFO", "ATM", "CD", "DVD",
 }
 
-# Not letter by letter.
+# Said as a word, or needs a custom respelling. Delete a line to turn it off.
 _SPELLED_OVERRIDES = {
     "wifi": "Wi Fi",
+    "json": "Jason",
+    "sql": "sequel",
+    "oauth": "oh auth",
+    "cors": "cores",
+    "yaml": "yammel",
 }
 
 _SPELLED_ANY_RE = re.compile(
@@ -673,7 +712,19 @@ def _spell_acronym(word: str, plural: str) -> str:
     override = _SPELLED_OVERRIDES.get(word.lower())
     if override:
         return override + plural
-    return " ".join(word.upper()) + plural
+
+    letters = list(word.upper())
+
+    if plural:
+        # "A P Is" gets read as the word "is". Respell the plural ending:
+        #   APIs -> "A P Eyes",  GPUs -> "G P U's",  CEOs -> "C E O's"
+        # Tune by ear: change "Eyes" or switch "'s" to "z" if needed.
+        if letters[-1] == "I":
+            letters[-1] = "Eyes"
+        else:
+            letters[-1] = letters[-1] + "'s"
+
+    return " ".join(letters)
 
 
 def _replace_spelled_acronyms(text: str) -> str:
@@ -860,6 +911,8 @@ def _replace_percentages(text: str) -> str:
 
 
 # 10-20 / 10 – 20   (a plain " - " is left alone: could be subtraction)
+# Note: this is lossy for things like "1-800"; it is kept because ranges
+# ("10-20 minutes") are far more common in assistant replies.
 _RANGE = re.compile(
     r"(?<![\w.-])(\d{1,4}(?:\.\d+)?)(?:-|\s?[–—]\s?)(\d{1,4}(?:\.\d+)?)(?![\d-])"
 )
@@ -1031,8 +1084,12 @@ def _replace_dotted_numbers(text: str) -> str:
     return _DOTTED.sub(replace, text)
 
 
-# T480 -> T four eighty | RTX4090 -> RTX forty ninety | iPhone15 -> iPhone fifteen
-_MODEL_NAME = re.compile(r"\b([A-Za-z]+)(\d+)\b")
+# Hardware / model names only: an UPPERCASE prefix (T480, RTX4090, USB3, MP3)
+# or a known product word (iPhone15, Pixel8). Case-sensitive on purpose, so
+# ordinary words and usernames like "win11" or "user42" are left alone.
+_MODEL_NAME = re.compile(
+    r"\b([A-Z]{1,5}|iPhone|iPad|iMac|Pixel|Galaxy)(\d+)\b"
+)
 
 
 def _replace_model_names(text: str) -> str:
@@ -1106,7 +1163,8 @@ def _normalize_speech(
     text = _clean_markdown(text)
     text = text.replace("−", "-")
 
-    # Structured things first.
+    # Structured things first. Security codes run before any generic number
+    # handling, so only code-context numbers are read digit by digit.
     text = _replace_emails(text)
     text = _replace_urls(text)
     text = _replace_security_codes(text)
@@ -2098,645 +2156,33 @@ def generate_voice_file(
 
 
 # ============================================================================
-# TESTS
-# ============================================================================
-#
-#   python tts.py --test-normalization   assertion tests, no model/audio needed
-#   python tts.py --test-pipeline        full speak/stop/WAV flow with a FAKE
-#                                        model and FAKE audio device
-#   python tts.py --test-all             both of the above (exit code 1 on fail)
-#   python tts.py --test                 real model + real speakers (by ear)
-#
-# --test-normalization and --test-pipeline are deterministic and safe to run in
-# CI. Only --test needs Pocket TTS weights and an audio device.
-
-# (input, expected spoken text)
-_NORMALIZATION_CASES: list[tuple[str, str]] = [
-    # --- clock times -------------------------------------------------------
-    ("It's 22:35 right now", "It's ten thirty five P M right now"),
-    ("The time is 22:35.", "The time is ten thirty five P M."),
-    ("Alarm at 07:05", "Alarm at seven oh five A M"),
-    ("Sunset is at 18:05", "Sunset is at six oh five P M"),
-    ("23:59", "eleven fifty nine P M"),
-    ("00:00", "midnight"),
-    ("12:00", "noon"),
-    ("00:15", "twelve fifteen A M"),
-    ("at 1:30", "at one thirty"),
-    ("Meeting at 10:30 PM", "Meeting at ten thirty P M"),
-    ("at 9 AM", "at nine A M"),
-    ("at 10:05 a.m.", "at ten oh five A M"),
-
-    # --- speed / units -----------------------------------------------------
-    ("Wind is 27 kph", "Wind is twenty seven kilometers per hour"),
-    ("Wind is 27kph", "Wind is twenty seven kilometers per hour"),
-    ("Top speed 120 km/h", "Top speed one hundred twenty kilometers per hour"),
-    ("Going 60 mph", "Going sixty miles per hour"),
-    ("1 kph", "one kilometer per hour"),
-    ("What is that in kph?", "What is that in kilometers per hour?"),
-    ("Download speed 50 Mbps", "Download speed fifty megabits per second"),
-    ("16 GB of RAM", "sixteen gigabytes of R A M"),
-    ("3.2 GHz", "three point two gigahertz"),
-    ("5000 mAh", "five thousand milliamp hours"),
-    ("It took 5m and 10s", "It took five meters and ten seconds"),
-    ("10-20 minutes", "ten to twenty minutes"),
-
-    # --- temperature / percent --------------------------------------------
-    ("It is 27°C outside", "It is twenty seven degrees Celsius outside"),
-    ("Temperature is 27.5°C.", "Temperature is twenty seven point five degrees Celsius."),
-    ("-3.5 °F", "minus three point five degrees Fahrenheit"),
-    ("Battery is at 87%.", "Battery is at eighty seven percent."),
-    ("99.5%", "ninety nine point five percent"),
-
-    # --- plain numbers -----------------------------------------------------
-    ("I have 5 tasks and 22 35", "I have five tasks and twenty two thirty five"),
-    ("1,234,567 views", "one million two hundred thirty four thousand five hundred sixty seven views"),
-    ("3.14", "three point one four"),
-    ("-5", "minus five"),
-    ("Score 3-2", "Score three to two"),
-    ("Call 01712345678", "Call zero one seven one two three four five six seven eight"),
-    ("security code 4413796", "security code four four one three seven nine six"),
-    ("the 22nd and 1st", "the twenty second and first"),
-    ("Meeting on the 3rd", "Meeting on the third"),
-
-    # --- money -------------------------------------------------------------
-    ("$5.50", "five dollars and fifty cents"),
-    ("$1", "one dollar"),
-    ("৳500", "five hundred taka"),
-    ("Tk 1,250", "one thousand two hundred fifty taka"),
-    ("$2.5 million", "two point five million dollars"),
-
-    # --- dates -------------------------------------------------------------
-    ("2026-10-04", "October fourth, twenty twenty six"),
-    ("October 4, 2026", "October four, twenty twenty six"),
-    ("in 2026", "in twenty twenty six"),
-
-    # --- tech names --------------------------------------------------------
-    ("ThinkPad T480", "ThinkPad T four eighty"),
-    ("RTX4090 GPU", "R T X forty ninety G P U"),
-    ("iPhone15", "iPhone fifteen"),
-    ("USB3", "U S B three"),
-    ("5G network", "five G network"),
-    ("4K 1080p", "four K ten eighty p"),
-    ("Enable 2FA", "Enable two factor authentication"),
-    ("version v2.5.1", "version version two point five point one"),
-    ("192.168.0.101", "one nine two dot one six eight dot zero dot one zero one"),
-
-    # --- web / markup ------------------------------------------------------
-    ("https://example.com/api/v1", "example dot com slash A P I slash version one"),
-    ("zoe@example.com", "Zoe at example dot com"),
-    ("**Bold** and `code` and [link](http://x.com)", "Bold and code and link"),
-    ("snake_case_word", "snake case word"),
-    ("ZOE is online", "Zoe is online"),
-
-    # --- spelled-out acronyms ----------------------------------------------
-    ("api", "A P I"),
-    ("The API returned an error", "The A P I returned an error"),
-    ("Two APIs are down", "Two A P Is are down"),
-    ("REST api v2", "REST A P I version two"),
-    ("ZOE API", "Zoe A P I"),
-    ("CPU and GPU", "C P U and G P U"),
-    ("JSON over HTTPS", "J S O N over H T T P S"),
-    ("SSH into the Raspberry Pi", "S S H into the Raspberry Pi"),
-    ("wifi is down", "Wi Fi is down"),
-    ("Check the ID on the TV", "Check the I D on the T V"),
-    ("snake_case_api", "snake case A P I"),
-    # capitals-only acronyms must not touch ordinary words
-    ("I said id and tv and os", "I said id and tv and os"),
-    ("The OS is fast", "The O S is fast"),
-    ("rapidly capital", "rapidly capital"),
-
-    # --- should be left alone ----------------------------------------------
-    ("No digits here at all.", "No digits here at all."),
-    ("", ""),
-]
-
-# Inputs where NO digit may survive normalization.
-_NO_DIGIT_SAMPLES = [
-    "Wind 27 kph, 22:35, 99.5%, $5.50, 5G, T480, RTX4090, 2026-10-04.",
-    "Order 1042 shipped on the 3rd, arriving 14:20 with 3 items for Tk 1,250.",
-    "Room 22 is 21.5°C, humidity 61%, battery 87%, 3 lights on.",
-]
-
-
-def _report(results: list[tuple[str, bool, str]]) -> bool:
-
-    failed = [r for r in results if not r[1]]
-
-    for name, ok, detail in results:
-        if not ok:
-            print(f"  FAIL  {name}")
-            if detail:
-                for line in detail.splitlines():
-                    print(f"        {line}")
-
-    print(
-        f"  {len(results) - len(failed)}/{len(results)} passed"
-    )
-
-    return not failed
-
-
-def _test_normalization() -> bool:
-    """Assertion-based tests for the speech normalizer."""
-
-    print()
-    print("=" * 72)
-    print("ZOE TTS NORMALIZATION TESTS")
-    print("=" * 72)
-
-    results: list[tuple[str, bool, str]] = []
-
-    # 1. Exact expected output.
-    for raw, expected in _NORMALIZATION_CASES:
-
-        actual = _normalize_speech(raw)
-
-        results.append(
-            (
-                f"{raw!r}",
-                actual == expected,
-                f"expected: {expected!r}\nactual  : {actual!r}",
-            )
-        )
-
-    # 2. No raw digits may reach the TTS model.
-    for sample in _NO_DIGIT_SAMPLES:
-
-        actual = _normalize_speech(sample)
-
-        results.append(
-            (
-                f"no digits left: {sample!r}",
-                not re.search(r"\d", actual),
-                f"actual: {actual!r}",
-            )
-        )
-
-    # 3. Normalizing twice must not change anything (idempotent).
-    for raw, _ in _NORMALIZATION_CASES:
-
-        once = _normalize_speech(raw)
-        twice = _normalize_speech(once)
-
-        results.append(
-            (
-                f"idempotent: {raw!r}",
-                once == twice,
-                f"once : {once!r}\ntwice: {twice!r}",
-            )
-        )
-
-    # 4. Chunking works on normalized text and respects the length limit.
-    long_text = " ".join(
-        f"Sentence {i} reports {20 + i} kph wind at 22:{i:02d}."
-        for i in range(30)
-    )
-
-    chunks = _split_sentences(long_text)
-
-    results.append(
-        (
-            "chunking: produces chunks",
-            len(chunks) == 30,
-            f"got {len(chunks)} chunks",
-        )
-    )
-
-    results.append(
-        (
-            "chunking: chunks within limit",
-            all(len(c) <= MAX_CHUNK_LENGTH for c in chunks),
-            "",
-        )
-    )
-
-    results.append(
-        (
-            "chunking: no digits in chunks",
-            not any(re.search(r"\d", c) for c in chunks),
-            "",
-        )
-    )
-
-    run_on = " ".join(["word"] * 400)
-
-    run_on_chunks = _split_sentences(run_on)
-
-    results.append(
-        (
-            "chunking: splits run-on text",
-            len(run_on_chunks) > 1
-            and all(len(c) <= MAX_CHUNK_LENGTH for c in run_on_chunks),
-            f"got {len(run_on_chunks)} chunks",
-        )
-    )
-
-    ok = _report(results)
-
-    print("=" * 72)
-
-    return ok
-
-
-def _test_pipeline() -> bool:
-    """
-    End-to-end test of speak / stop / callbacks / WAV output.
-
-    Uses a FAKE Pocket TTS model and a FAKE sounddevice stream, so it needs
-    no model weights and no audio hardware.
-    """
-
-    global _tts
-    global _voice_state
-
-    print()
-    print("=" * 72)
-    print("ZOE TTS PIPELINE TESTS (fake model, fake audio device)")
-    print("=" * 72)
-
-    class FakeModel:
-
-        def __init__(self) -> None:
-            self.texts: list[str] = []
-            self.lock = threading.Lock()
-
-        def generate_audio_stream(
-            self,
-            model_state,
-            text_to_generate,
-            copy_state=True,
-        ):
-            with self.lock:
-                self.texts.append(text_to_generate)
-
-            for _ in range(2):
-                yield np.full(2_400, 0.1, dtype=np.float32)
-
-    class FakeStream:
-
-        instances: list["FakeStream"] = []
-
-        def __init__(self, **kwargs) -> None:
-            self.kwargs = kwargs
-            self.active = False
-            self.frames = 0
-            FakeStream.instances.append(self)
-
-        def start(self) -> None:
-            self.active = True
-
-        def write(self, data) -> None:
-            self.frames += len(data)
-            time.sleep(0.001)
-
-        def abort(self) -> None:
-            self.active = False
-
-        def close(self) -> None:
-            self.active = False
-
-    results: list[tuple[str, bool, str]] = []
-
-    saved_model = _tts
-    saved_voice = _voice_state
-    saved_stream_cls = sd.OutputStream
-
-    fake = FakeModel()
-
-    _tts = fake  # type: ignore[assignment]
-    _voice_state = object()
-    sd.OutputStream = FakeStream  # type: ignore[assignment]
-
-    wav_path: str | None = None
-
-    try:
-
-        stop()
-        _stop_audio_stream()
-
-        # 1. Blocking speak plays to completion with normalized text.
-        done = threading.Event()
-
-        success = speak(
-            "The time is 22:35. Wind is 27 kph.",
-            on_complete=done.set,
-        )
-
-        spoken = " ".join(fake.texts)
-
-        results.append(("speak() returns True", success, ""))
-
-        results.append(
-            (
-                "model received 'ten thirty five P M'",
-                "ten thirty five P M" in spoken,
-                f"model text: {spoken!r}",
-            )
-        )
-
-        results.append(
-            (
-                "model received 'kilometers per hour'",
-                "kilometers per hour" in spoken,
-                f"model text: {spoken!r}",
-            )
-        )
-
-        results.append(
-            (
-                "model never saw a digit",
-                not re.search(r"\d", spoken),
-                f"model text: {spoken!r}",
-            )
-        )
-
-        results.append(
-            (
-                "on_complete fired",
-                done.wait(timeout=2.0),
-                "",
-            )
-        )
-
-        results.append(
-            (
-                "audio reached the output device",
-                sum(s.frames for s in FakeStream.instances) > 0,
-                "",
-            )
-        )
-
-        results.append(
-            (
-                "is_speaking() is False afterwards",
-                not is_speaking(),
-                "",
-            )
-        )
-
-        status = get_status()
-
-        results.append(
-            (
-                "status: playback_finished, no failure",
-                bool(status["playback_finished"])
-                and not status["generation_failed"],
-                f"status: {status}",
-            )
-        )
-
-        # 2. Empty / whitespace text is rejected cleanly.
-        results.append(("speak('') returns False", speak("") is False, ""))
-        results.append(("speak('   ') returns False", speak("   ") is False, ""))
-
-        # 3. Interrupting with stop(), then speaking again, still works.
-        long_id = speak_async(
-            " ".join(
-                f"This is long sentence number {i}."
-                for i in range(40)
-            )
-        )
-
-        results.append(
-            (
-                "long reply (40 sentences) is accepted",
-                long_id is not None,
-                f"speak_async returned {long_id}",
-            )
-        )
-
-        time.sleep(0.05)
-
-        stop()
-
-        results.append(
-            (
-                "stop() clears speaking state",
-                not is_speaking(),
-                "",
-            )
-        )
-
-        results.append(
-            (
-                "stop() empties queues",
-                _audio_queue.empty() and _generation_queue.empty(),
-                "",
-            )
-        )
-
-        results.append(
-            (
-                "speak() works again after stop()",
-                speak("Back online.") is True,
-                "",
-            )
-        )
-
-        # 4. A new utterance replaces one that is still playing.
-        first = speak_async(
-            " ".join(
-                f"Old utterance sentence {i}."
-                for i in range(40)
-            )
-        )
-
-        second = speak_async("Newer utterance.")
-
-        old_state = _get_state(first) if first is not None else None
-
-        results.append(
-            (
-                "new speech supersedes old speech",
-                first is not None
-                and second is not None
-                and second > first
-                and old_state is None,
-                f"first={first} second={second}",
-            )
-        )
-
-        if second is not None:
-            new_state = _get_state(second)
-            if new_state is not None:
-                new_state.speech_complete_event.wait(timeout=3.0)
-
-        # 5. WAV file generation.
-        wav_path = generate_voice_file(
-            "Wind is 27 kph at 22:35."
-        )
-
-        wav_ok = False
-        wav_detail = f"path: {wav_path!r}"
-
-        if wav_path and os.path.exists(wav_path):
-
-            with wave.open(wav_path, "rb") as wav:
-
-                wav_ok = (
-                    wav.getnchannels() == 1
-                    and wav.getsampwidth() == 2
-                    and wav.getframerate() == SAMPLE_RATE
-                    and wav.getnframes() > 0
-                )
-
-                wav_detail = (
-                    f"channels={wav.getnchannels()} "
-                    f"width={wav.getsampwidth()} "
-                    f"rate={wav.getframerate()} "
-                    f"frames={wav.getnframes()}"
-                )
-
-        results.append(("generate_voice_file() writes valid WAV", wav_ok, wav_detail))
-
-        results.append(
-            (
-                "generate_voice_file('') returns None",
-                generate_voice_file("") is None,
-                "",
-            )
-        )
-
-    finally:
-
-        stop()
-        _stop_audio_stream()
-
-        sd.OutputStream = saved_stream_cls  # type: ignore[assignment]
-        _tts = saved_model
-        _voice_state = saved_voice
-
-        if wav_path:
-            try:
-                os.remove(wav_path)
-            except OSError:
-                pass
-
-    ok = _report(results)
-
-    print("=" * 72)
-
-    return ok
-
-
-def _test() -> None:
-    """Real model + real speakers. Judge by ear."""
-
-    text = (
-        "Hello Sir. "
-        "This is the ZOE Pocket TTS production test. "
-        "The current time is 22:35, and the wind is 27 kph. "
-        "It is 27 degrees Celsius outside, with 99.5% humidity. "
-        "The API call finished, and the CPU and GPU are idle. "
-        "The ThinkPad T480 is being tested with an RTX4090 GPU. "
-        "The iPhone15 is another example. "
-        "Your meeting is at 10:30 PM on October 4th. "
-        "The server is available at "
-        "https://example.com/api/v1. "
-        "The email is zoe@example.com. "
-        "You received a security code 4413796. "
-        "The code should be spoken digit by digit. "
-        "Playback should finish naturally."
-    )
-
-    LOGGER.info(
-        "TTS test starting..."
-    )
-
-    LOGGER.info(
-        "Normalized: %s",
-        _normalize_speech(text),
-    )
-
-    started = time.monotonic()
-
-    success = speak(text)
-
-    LOGGER.info(
-        "TTS test finished: success=%s elapsed=%.2fs",
-        success,
-        time.monotonic() - started,
-    )
-
-
-# ============================================================================
-# CLI
-# ============================================================================
-
-def _main() -> int:
-
-    parser = argparse.ArgumentParser(
-        description="ZOE Pocket TTS"
-    )
-
-    parser.add_argument(
-        "--test",
-        action="store_true",
-        help="Real model + real speakers (listen by ear).",
-    )
-
-    parser.add_argument(
-        "--test-normalization",
-        action="store_true",
-        help="Assertion tests for text normalization (no model/audio).",
-    )
-
-    parser.add_argument(
-        "--test-pipeline",
-        action="store_true",
-        help="Speak/stop/WAV tests with a fake model and fake audio.",
-    )
-
-    parser.add_argument(
-        "--test-all",
-        action="store_true",
-        help="Run normalization + pipeline tests.",
-    )
-
-    args = parser.parse_args()
-
-    ran_any = False
-    ok = True
-
-    if args.test_normalization or args.test_all:
-        ran_any = True
-        ok = _test_normalization() and ok
-
-    if args.test_pipeline or args.test_all:
-        ran_any = True
-        ok = _test_pipeline() and ok
-
-    if ran_any:
-        print()
-        print("ALL TESTS PASSED" if ok else "SOME TESTS FAILED")
-        return 0 if ok else 1
-
-    _test()
-    return 0
-
-
-# ============================================================================
 # CLEANUP
 # ============================================================================
 
 atexit.register(shutdown)
 
 
+# ============================================================================
+# QUICK CHECK
+# ============================================================================
+#
+#   python tts.py            speaks a sample line (real model + speakers)
+#   python tts.py --text     prints what the normalizer produces (no audio)
+
 if __name__ == "__main__":
 
-    exit_code = 0
+    SAMPLE = (
+        "Hello Hasin. The time is 22:35, and the wind is 27 kph. "
+        "Your Meta login code is 125012. "
+        "The API call finished. I have 16 GB of RAM and 3 APIs."
+    )
 
     try:
-        exit_code = _main()
-
+        if "--text" in sys.argv:
+            print(_normalize_speech(SAMPLE))
+        else:
+            speak(SAMPLE)
     except KeyboardInterrupt:
-
-        LOGGER.info(
-            "Interrupted."
-        )
-
+        pass
     finally:
-
         shutdown()
-
-    sys.exit(exit_code)

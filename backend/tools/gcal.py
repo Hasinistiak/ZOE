@@ -919,42 +919,212 @@ def delete_event(
     return True
 
 
-# ============================================================
-# TEST
-# ============================================================
 
 if __name__ == "__main__":
+    from collections import Counter
+    import traceback
 
-    print("\n=== TODAY ===")
+    # ========================================================
+    # READ-ONLY GOOGLE CALENDAR FUNCTION TESTS
+    # ========================================================
 
-    for event in get_today_events():
+    now = datetime.now(ZOE_TIMEZONE)
+    start = now
+    end = now + timedelta(days=14)
 
+    results = {}
+
+    def run_test(name, function):
+        print(f"\n{'─' * 60}")
+        print(f"TEST: {name}")
+        print("─" * 60)
+
+        try:
+            result = function()
+            results[name] = "PASS"
+            print("STATUS: PASS")
+
+            if isinstance(result, list):
+                print(f"Events found: {len(result)}")
+
+                for event in result:
+                    print(
+                        f"  [{event.get('calendar', '?')}] "
+                        f"{event.get('title', 'Untitled')} | "
+                        f"{event.get('time', '?')} | "
+                        f"{event.get('day', '?')} | "
+                        f"{event.get('status', '?')}"
+                    )
+
+            elif isinstance(result, dict):
+                print(f"Title: {result.get('title', 'Unknown')}")
+                print(f"Calendar: {result.get('calendar', 'Unknown')}")
+                print(f"Date/time: {result.get('datetime', 'Unknown')}")
+                print(f"Status: {result.get('status', 'Unknown')}")
+                print(f"Event ID: {result.get('id', 'Unknown')}")
+
+            elif result is None:
+                print("Result: No matching event found.")
+
+            else:
+                print(f"Result: {result}")
+
+            return result
+
+        except Exception as exc:
+            results[name] = "FAIL"
+            print(f"STATUS: FAIL")
+            print(f"Error: {type(exc).__name__}: {exc}")
+            traceback.print_exc()
+            return None
+
+    # --------------------------------------------------------
+    # 1. CALENDAR RESOLUTION
+    # --------------------------------------------------------
+
+    print("\n" + "=" * 60)
+    print(" ZOE GOOGLE CALENDAR — READ-ONLY TEST SUITE")
+    print("=" * 60)
+    print(f"Current time: {now.strftime('%Y-%m-%d %I:%M:%S %p %Z')}")
+    print(f"Fetch range:  {start.date()} → {end.date()}")
+    print("Mode: READ-ONLY — no events will be created or deleted.")
+
+    run_test(
+        "Resolve personal calendar",
+        lambda: resolve_calendar_id("personal"),
+    )
+
+    run_test(
+        "Resolve F1 calendar",
+        lambda: resolve_calendar_id("f1"),
+    )
+
+    run_test(
+        "Resolve football calendar",
+        lambda: resolve_calendar_id("football"),
+    )
+
+    # --------------------------------------------------------
+    # 2. GENERIC EVENT FETCHER
+    # --------------------------------------------------------
+
+    all_events = run_test(
+        "Fetch all configured calendars (14 days)",
+        lambda: get_events(start, end),
+    )
+
+    personal_events = run_test(
+        "Fetch personal calendar (14 days)",
+        lambda: get_personal_events(start, end),
+    )
+
+    football_events = run_test(
+        "Fetch football calendar (14 days)",
+        lambda: get_football_events(start, end),
+    )
+
+    f1_events = run_test(
+        "Fetch F1 calendar (14 days)",
+        lambda: get_f1_events(start, end),
+    )
+
+    # --------------------------------------------------------
+    # 3. TODAY'S EVENTS
+    # --------------------------------------------------------
+
+    today_events = run_test(
+        "Fetch today's events (all calendars)",
+        lambda: get_today_events(),
+    )
+
+    run_test(
+        "Fetch today's personal events",
+        lambda: get_today_events("personal"),
+    )
+
+    run_test(
+        "Fetch today's football events",
+        lambda: get_today_events("football"),
+    )
+
+    run_test(
+        "Fetch today's F1 events",
+        lambda: get_today_events("f1"),
+    )
+
+    # --------------------------------------------------------
+    # 4. NEXT F1 RACE
+    # --------------------------------------------------------
+
+    next_race = run_test(
+        "Find next F1 race",
+        get_next_f1_race,
+    )
+
+    # --------------------------------------------------------
+    # 5. NEXT FOOTBALL MATCH
+    # --------------------------------------------------------
+
+    next_match = run_test(
+        "Find next football match",
+        get_next_football_match,
+    )
+
+    # --------------------------------------------------------
+    # 6. FETCH ONE EVENT BY ID
+    # --------------------------------------------------------
+
+    candidate = None
+
+    for event_list in (
+        today_events,
+        personal_events,
+        football_events,
+        f1_events,
+        all_events,
+    ):
+        if event_list:
+            candidate = next(
+                (
+                    event for event in event_list
+                    if event.get("id") and event.get("calendar")
+                ),
+                None,
+            )
+
+            if candidate:
+                break
+
+    if candidate:
+        run_test(
+            "Fetch single event by ID",
+            lambda: get_event(
+                event_id=candidate["id"],
+                calendar=candidate["calendar"],
+            ),
+        )
+    else:
+        results["Fetch single event by ID"] = "SKIP"
         print(
-            event["calendar"],
-            "|",
-            event["title"],
-            "|",
-            event["time"],
-            "|",
-            event["status"],
+            "\nSKIP: Fetch single event by ID — "
+            "no event with an ID was found in the fetched results."
         )
 
-    print("\n=== NEXT F1 RACE ===")
+    # --------------------------------------------------------
+    # 7. SUMMARY
+    # --------------------------------------------------------
 
-    next_race = (
-        get_next_f1_race()
-    )
+    print("\n" + "=" * 60)
+    print(" TEST SUMMARY")
+    print("=" * 60)
 
-    print(
-        next_race
-    )
+    for name, status in results.items():
+        print(f"{status:5} | {name}")
 
-    print("\n=== NEXT FOOTBALL ===")
+    counts = Counter(results.values())
 
-    next_match = (
-        get_next_football_match()
-    )
-
-    print(
-        next_match
-    )
+    print("-" * 60)
+    print(f"Passed:  {counts.get('PASS', 0)}")
+    print(f"Failed:  {counts.get('FAIL', 0)}")
+    print(f"Skipped: {counts.get('SKIP', 0)}")
+    print("=" * 60)

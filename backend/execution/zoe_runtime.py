@@ -403,6 +403,7 @@ class ZoeRuntime:
                 "event": event,
                 "answer": "",
                 "error": None,
+                "abandoned": False,
             }
 
         return event
@@ -439,6 +440,19 @@ class ZoeRuntime:
 
             waiter["event"].set()
 
+            # --------------------------------------------------
+            # If the foreground caller already timed out and
+            # left, nobody will collect this waiter. Remove it
+            # now so abandoned waiters cannot accumulate.
+            # --------------------------------------------------
+
+            if waiter.get("abandoned"):
+
+                self._completion_waiters.pop(
+                    interaction_id,
+                    None,
+                )
+
     # ========================================================
 
     def _wait_for_completion(
@@ -473,6 +487,13 @@ class ZoeRuntime:
 
                 return ""
 
+            # A resolution may land between the timeout and
+            # re-acquiring the lock.
+            completed = (
+                completed
+                or waiter["event"].is_set()
+            )
+
             answer = str(
                 waiter.get(
                     "answer",
@@ -490,7 +511,8 @@ class ZoeRuntime:
             # completed.
             #
             # If timeout occurs, keep it alive so a background
-            # agent can resolve it later.
+            # agent can resolve it later, but mark it abandoned
+            # so _resolve_completion() removes it afterwards.
             # ------------------------------------------------
 
             if completed:
@@ -499,6 +521,10 @@ class ZoeRuntime:
                     interaction_id,
                     None,
                 )
+
+            else:
+
+                waiter["abandoned"] = True
 
         if error:
 
@@ -1199,6 +1225,17 @@ class ZoeRuntime:
             },
         )
 
+        # A silent notification never triggers TTS, so nothing
+        # else would ever leave the NOTIFYING state.
+        if (
+            not response.speak
+            and self.get_state() == self.STATE_NOTIFYING
+        ):
+
+            self._set_state(
+                self.STATE_IDLE
+            )
+
         print(
             "[STATUS] "
             "Proactive notification dispatched "
@@ -1541,9 +1578,24 @@ class ZoeRuntime:
 
             # =================================================
             # STATE
+            #
+            # EXECUTING is only kept while agents are really
+            # still running. If they already finished (fast
+            # agents), the state must not stay stuck.
             # =================================================
 
-            if self.get_state() not in {
+            current_state = self.get_state()
+
+            if (
+                current_state == self.STATE_EXECUTING
+                and not self.has_active_agents()
+            ):
+
+                self._set_state(
+                    self.STATE_IDLE
+                )
+
+            elif current_state not in {
                 self.STATE_EXECUTING,
                 self.STATE_SPEAKING,
                 self.STATE_NOTIFYING,
@@ -1610,8 +1662,6 @@ class ZoeRuntime:
         # ====================================================
 
         if response.action == "answer":
-
-
 
             answer = response.answer.strip()
 
@@ -1740,6 +1790,19 @@ class ZoeRuntime:
                 self._capture_session_context()
             )
 
+            # ------------------------------------------------
+            # Set EXECUTING BEFORE starting the agents. A fast
+            # agent can finish before _start_agents() returns;
+            # setting the state afterwards would overwrite the
+            # agent's own state transitions and leave the
+            # runtime stuck in EXECUTING.
+            # ------------------------------------------------
+
+            self._set_state(
+                self.STATE_EXECUTING,
+                reason="background_agents",
+            )
+
             batch_id = self._start_agents(
                 calls=normalized_calls,
                 speak_output=(
@@ -1748,11 +1811,6 @@ class ZoeRuntime:
                 ),
                 interaction_id=interaction_id,
                 session_context=session_context,
-            )
-
-            self._set_state(
-                self.STATE_EXECUTING,
-                reason="background_agents",
             )
 
             answer = str(
@@ -2928,15 +2986,17 @@ class ZoeRuntime:
         # FINAL RESPONSE EVENT
         # ====================================================
 
+        final_speak = bool(
+            batch_speak_output
+            and response.speak
+        )
+
         self._emit_event(
             "response",
             {
                 "interaction_id": interaction_id,
                 "text": answer,
-                "speak": (
-                    batch_speak_output
-                    and response.speak
-                ),
+                "speak": final_speak,
                 "interrupt": response.interrupt,
                 "batch_id": batch_id,
                 "background": True,
@@ -2947,10 +3007,7 @@ class ZoeRuntime:
 
         self._emit_output(
             answer,
-            speak_output=(
-                batch_speak_output
-                and response.speak
-            ),
+            speak_output=final_speak,
             interrupt=response.interrupt,
             event_type="response",
             metadata={
@@ -2971,7 +3028,11 @@ class ZoeRuntime:
             answer=answer,
         )
 
-        if not batch_speak_output:
+        # If nothing will be spoken, no TTS completion will ever
+        # leave the THINKING state, so do it here. (Previously
+        # this only covered batch_speak_output being False, which
+        # left the runtime stuck when the brain set speak=False.)
+        if not final_speak:
 
             self._set_state(
                 self.STATE_IDLE

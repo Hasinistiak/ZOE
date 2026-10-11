@@ -1,3 +1,4 @@
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -15,6 +16,7 @@ from backend.agents.weather_agent import run_weather_agent
 from backend.agents.news_agent import run_world_news_agent
 from backend.agents.web_search_agent import run_web_search_agent
 from backend.agents.project_agent import run_project_creator_agent
+from backend.agents.application_manager_agent import run_application_agent
 
 
 # ============================================================
@@ -26,16 +28,7 @@ AgentFunction = Callable[..., Any]
 
 @dataclass(frozen=True, slots=True)
 class AgentSpec:
-    """
-    Immutable definition of a ZOE agent.
-
-    The Brain only needs:
-        - name
-        - description
-
-    Runtime needs:
-        - function
-    """
+    """Immutable definition of a ZOE agent."""
 
     name: str
     description: str
@@ -48,10 +41,7 @@ class AgentSpec:
 
 AGENTS: dict[str, AgentSpec] = {
 
-    # ========================================================
     # PERSONAL CALENDAR
-    # ========================================================
-
     "calendar": AgentSpec(
         name="calendar",
         description=(
@@ -62,10 +52,7 @@ AGENTS: dict[str, AgentSpec] = {
         function=run_calendar_agent,
     ),
 
-    # ========================================================
     # FOOTBALL CALENDAR
-    # ========================================================
-
     "football_calendar": AgentSpec(
         name="football_calendar",
         description=(
@@ -75,10 +62,7 @@ AGENTS: dict[str, AgentSpec] = {
         function=run_football_agent,
     ),
 
-    # ========================================================
     # FORMULA 1 CALENDAR
-    # ========================================================
-
     "f1_calendar": AgentSpec(
         name="f1_calendar",
         description=(
@@ -88,10 +72,7 @@ AGENTS: dict[str, AgentSpec] = {
         function=run_f1_agent,
     ),
 
-    # ========================================================
     # REMINDERS
-    # ========================================================
-
     "reminder": AgentSpec(
         name="reminder",
         description=(
@@ -101,10 +82,7 @@ AGENTS: dict[str, AgentSpec] = {
         function=run_reminder_agent,
     ),
 
-    # ========================================================
     # EMAIL
-    # ========================================================
-
     "email": AgentSpec(
         name="email",
         description=(
@@ -115,10 +93,7 @@ AGENTS: dict[str, AgentSpec] = {
         function=run_email_agent,
     ),
 
-    # ========================================================
     # SPOTIFY
-    # ========================================================
-
     "spotify": AgentSpec(
         name="spotify",
         description=(
@@ -128,10 +103,7 @@ AGENTS: dict[str, AgentSpec] = {
         function=run_spotify_agent,
     ),
 
-    # ========================================================
     # WEATHER
-    # ========================================================
-
     "weather": AgentSpec(
         name="weather",
         description=(
@@ -141,10 +113,7 @@ AGENTS: dict[str, AgentSpec] = {
         function=run_weather_agent,
     ),
 
-    # ========================================================
     # WORLD NEWS
-    # ========================================================
-
     "news": AgentSpec(
         name="news",
         description=(
@@ -155,48 +124,39 @@ AGENTS: dict[str, AgentSpec] = {
         function=run_world_news_agent,
     ),
 
-    # ========================================================
     # WEB SEARCH
-    # ========================================================
-
     "web_search": AgentSpec(
         name="web_search",
         description=(
             "General web search and research. Use this when the "
             "user asks a question that requires current, recent, "
             "or externally verifiable information. Search the web "
+            "for relevant information and return useful results."
         ),
         function=run_web_search_agent,
     ),
 
-    # ========================================================
     # FOOTBALL NEWS
-    # ========================================================
-
     "football_news": AgentSpec(
         name="football_news",
         description=(
-            "Latest football news."
+            "Latest football news, transfer updates, match reports, "
+            "club news, and other major football developments."
         ),
         function=run_football_news_agent,
     ),
 
-    # ========================================================
     # FORMULA 1 NEWS
-    # ========================================================
-
     "f1_news": AgentSpec(
         name="f1_news",
         description=(
-            "Latest Formula 1 news."
+            "Latest Formula 1 news, race updates, qualifying results, "
+            "driver news, team developments, and championship updates."
         ),
         function=run_f1_news_agent,
     ),
 
-    # ========================================================
     # PROJECT CREATOR
-    # ========================================================
-
     "project_creator": AgentSpec(
         name="project_creator",
         description=(
@@ -206,6 +166,16 @@ AGENTS: dict[str, AgentSpec] = {
         ),
         function=run_project_creator_agent,
     ),
+
+    # APPLICATION MANAGER
+    "application_manager": AgentSpec(
+        name="application_manager",
+        description=(
+            "Windows application management: launch apps (spotify, blip, whatsapp), list open windows, "
+            "switch between apps, focus, minimize, maximize, restore, and close windows."
+        ),
+        function=run_application_agent,
+    ),
 }
 
 
@@ -214,12 +184,7 @@ AGENTS: dict[str, AgentSpec] = {
 # ============================================================
 
 def get_agent_descriptions() -> list[dict[str, str]]:
-    """
-    Return the minimal agent information required by the Brain.
-
-    This intentionally excludes Python functions and implementation
-    details to keep the Brain context small.
-    """
+    """Return the minimal agent information required by the Brain."""
 
     return [
         {
@@ -231,19 +196,13 @@ def get_agent_descriptions() -> list[dict[str, str]]:
 
 
 def get_agent_names() -> tuple[str, ...]:
-    """
-    Return all registered agent names.
-    """
+    """Return all registered agent names."""
 
     return tuple(AGENTS.keys())
 
 
-def has_agent(
-    agent_name: str,
-) -> bool:
-    """
-    Return True if an agent is registered.
-    """
+def has_agent(agent_name: str) -> bool:
+    """Return True if an agent is registered."""
 
     return agent_name in AGENTS
 
@@ -252,12 +211,8 @@ def has_agent(
 # AGENT LOOKUP
 # ============================================================
 
-def get_agent(
-    agent_name: str,
-) -> AgentSpec:
-    """
-    Return the complete specification for an agent.
-    """
+def get_agent(agent_name: str) -> AgentSpec:
+    """Return the complete specification for an agent."""
 
     try:
         return AGENTS[agent_name]
@@ -271,36 +226,18 @@ def get_agent(
         ) from None
 
 
-def get_agent_function(
-    agent_name: str,
-) -> AgentFunction:
-    """
-    Return the executable function for an agent.
-    """
+def get_agent_function(agent_name: str) -> AgentFunction:
+    """Return the executable function for an agent."""
 
-    return get_agent(
-        agent_name
-    ).function
+    return get_agent(agent_name).function
 
 
 # ============================================================
 # AGENT EXECUTION
 # ============================================================
 
-def execute_agent(
-    agent_name: str,
-    **kwargs: Any,
-) -> Any:
-    """
-    Execute a registered agent.
+def execute_agent(agent_name: str, **kwargs: Any) -> Any:
+    """Execute a registered agent with its specific arguments."""
 
-    Agent-specific arguments are passed through unchanged.
-    """
-
-    function = get_agent_function(
-        agent_name
-    )
-
-    return function(
-        **kwargs
-    )
+    function = get_agent_function(agent_name)
+    return function(**kwargs)
