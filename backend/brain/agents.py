@@ -17,6 +17,7 @@ from backend.agents.news_agent import run_world_news_agent
 from backend.agents.web_search_agent import run_web_search_agent
 from backend.agents.project_agent import run_project_creator_agent
 from backend.agents.application_manager_agent import run_application_agent
+from backend.agents.vitals_monitor_agent import run_vitals_monitor_agent
 
 
 # ============================================================
@@ -171,10 +172,21 @@ AGENTS: dict[str, AgentSpec] = {
     "application_manager": AgentSpec(
         name="application_manager",
         description=(
-            "Windows application management: launch apps (spotify, blip, whatsapp), list open windows, "
-            "switch between apps, focus, minimize, maximize, restore, and close windows."
+            "Windows application management: launch apps (Spotify, "
+            "Blip, WhatsApp), list open windows, switch between apps, "
+            "focus, minimize, maximize, restore, and close windows."
         ),
         function=run_application_agent,
+    ),
+
+    # VITALS MONITOR
+    "vitals_monitor": AgentSpec(
+        name="vitals_monitor",
+        description=(
+            "ESP32 Vital Monitor: measure heart rate (BPM) and blood "
+            "oxygen (SpO2), retrieve live readings, and check device status."
+        ),
+        function=run_vitals_monitor_agent,
     ),
 }
 

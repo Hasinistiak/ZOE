@@ -192,60 +192,6 @@ def _set_safe_last_response(response: str) -> None:
 
 
 # ============================================================
-# STARTUP MESSAGE
-# ============================================================
-
-def _send_startup_message() -> None:
-
-
-    startup_message = (
-        "You're coming online. "
-        "give Hasin a concise startup greeting."
-    )
-
-    try:
-
-        print("[FLASK] Sending startup message to ZOE...")
-
-        result = run_zoe(
-            startup_message,
-            speak_output=True,
-        )
-
-        response_text = extract_response_text(
-            result
-        )
-
-        if response_text is None:
-            response_text = ""
-
-        if not isinstance(
-            response_text,
-            str,
-        ):
-            response_text = str(
-                response_text
-            )
-
-        response_text = response_text.strip()
-
-        _set_safe_last_response(
-            response_text
-        )
-
-        print(
-            "[FLASK] ZOE startup message processed."
-        )
-
-    except Exception as exc:
-
-        print(
-            "[FLASK] ZOE startup message failed:",
-            exc,
-        )
-
-
-# ============================================================
 # STARTUP
 # ============================================================
 
@@ -319,16 +265,6 @@ def start_services() -> None:
         # ----------------------------------------------------
 
         _startup_complete = True
-
-        # ----------------------------------------------------
-        # ZOE STARTUP MESSAGE
-        # ----------------------------------------------------
-
-        threading.Thread(
-            target=_send_startup_message,
-            name="ZOE-Startup-Message",
-            daemon=True,
-        ).start()
 
 
 # ============================================================
@@ -1501,114 +1437,7 @@ def main() -> None:
         f"                 {SERVICE_NAME}"
     )
 
-    print(
-        "             FLASK API SERVER"
-    )
-
     print("=" * 52)
-
-    print()
-
-    print("Frontend:")
-
-    print(
-        f"  {FRONTEND_URL}"
-    )
-
-    print()
-
-    print("Backend:")
-
-    print(
-        f"  http://127.0.0.1:{BACKEND_PORT}"
-    )
-
-    print()
-
-    print("Realtime STT:")
-
-    print(
-        "  GET /api/stt"
-    )
-
-    print()
-
-    print("State:")
-
-    print(
-        "  GET /api/state"
-    )
-
-    print()
-
-    print("Activity:")
-
-    print(
-        "  GET /api/activity"
-    )
-
-    print()
-
-    print("Runtime events:")
-
-    print(
-        "  GET /api/events"
-    )
-
-    print()
-
-    print("Response:")
-
-    print(
-        "  GET /api/response"
-    )
-
-    print()
-
-    print("Chat:")
-
-    print(
-        "  POST /api/chat"
-    )
-
-    print()
-
-    print("Microphone:")
-
-    print(
-        "  GET  /api/microphone"
-    )
-
-    print(
-        "  POST /api/microphone/mute"
-    )
-
-    print(
-        "  POST /api/microphone/unmute"
-    )
-
-    print()
-
-    print("Speech:")
-
-    print(
-        "  POST /api/speech/stop"
-    )
-
-    print()
-
-    print("Telegram:")
-
-    print(
-        "  Enabled:",
-        is_telegram_running(),
-    )
-
-    print()
-
-    print(
-        "[FLASK] Starting HTTP backend..."
-    )
 
     print()
 

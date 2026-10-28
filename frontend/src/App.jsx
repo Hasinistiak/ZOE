@@ -4,10 +4,6 @@ import React, {
     useState,
 } from "react";
 
-import {
-    WebviewWindow,
-} from "@tauri-apps/api/webviewWindow";
-
 import ZoeOrb from "./widgets/ZoeOrb";
 import ProcessingHUD from "./widgets/ProcessingHUD";
 
@@ -367,220 +363,6 @@ export default function ZoeDashboard() {
 
     const previousResponseRef =
         useRef("");
-
-
-    // ========================================================
-    // TAURI EXTERNAL WINDOW REFS
-    // ========================================================
-
-    const openedUrlsRef =
-        useRef(
-            new Set()
-        );
-
-
-    const externalWindowCounterRef =
-        useRef(0);
-
-
-    // ========================================================
-    // OPEN URL IN NEW TAURI WINDOW
-    // ========================================================
-
-    async function openExternalUrl(
-        url
-    ) {
-
-        const cleanUrl =
-            typeof url === "string"
-                ? url.trim()
-                : "";
-
-
-        if (
-            !cleanUrl
-        ) {
-
-            return;
-
-        }
-
-
-        let parsedUrl;
-
-
-        try {
-
-            parsedUrl =
-                new URL(
-                    cleanUrl
-                );
-
-        } catch (error) {
-
-            console.error(
-                "[ZOE] Invalid URL:",
-                cleanUrl,
-                error
-            );
-
-            return;
-
-        }
-
-
-        if (
-            parsedUrl.protocol !== "http:" &&
-            parsedUrl.protocol !== "https:"
-        ) {
-
-            console.error(
-                "[ZOE] Refusing unsupported URL scheme:",
-                parsedUrl.protocol
-            );
-
-            return;
-
-        }
-
-
-        if (
-            openedUrlsRef.current.has(
-                cleanUrl
-            )
-        ) {
-
-            return;
-
-        }
-
-
-        openedUrlsRef.current.add(
-            cleanUrl
-        );
-
-
-        externalWindowCounterRef.current += 1;
-
-
-        const windowNumber =
-            externalWindowCounterRef.current;
-
-
-        const label =
-            `zoe-external-${windowNumber}`;
-
-
-        let hostname =
-            parsedUrl.hostname;
-
-
-        try {
-
-            hostname =
-                decodeURIComponent(
-                    hostname
-                );
-
-        } catch {
-
-            // Keep original hostname.
-
-        }
-
-
-        try {
-
-            const externalWindow =
-                new WebviewWindow(
-                    label,
-                    {
-
-                        url:
-                            cleanUrl,
-
-                        title:
-                            `ZOE · ${hostname}`,
-
-                        width:
-                            1200,
-
-                        height:
-                            800,
-
-                        resizable:
-                            true,
-
-                        center:
-                            true,
-
-                        focus:
-                            true,
-
-                        visible:
-                            true,
-
-                    }
-                );
-
-
-            await new Promise(
-                (resolve) => {
-
-                    externalWindow.once(
-                        "tauri://created",
-                        () => {
-
-                            console.log(
-                                `[ZOE] External window created: ${label}`,
-                                cleanUrl
-                            );
-
-                            resolve();
-
-                        }
-                    );
-
-
-                    externalWindow.once(
-                        "tauri://error",
-                        (event) => {
-
-                            console.error(
-                                `[ZOE] Failed to create external window: ${label}`,
-                                event
-                            );
-
-
-                            openedUrlsRef.current.delete(
-                                cleanUrl
-                            );
-
-
-                            resolve();
-
-                        }
-                    );
-
-                }
-            );
-
-
-        } catch (error) {
-
-            console.error(
-                "[ZOE] Failed to open Tauri external window:",
-                error
-            );
-
-
-            openedUrlsRef.current.delete(
-                cleanUrl
-            );
-
-        }
-
-    }
 
 
     // ========================================================
@@ -995,23 +777,6 @@ export default function ZoeDashboard() {
 
                     setResponse(
                         data.response
-                    );
-
-                }
-
-
-                const backendUrl =
-                    typeof data.url === "string"
-                        ? data.url.trim()
-                        : "";
-
-
-                if (
-                    backendUrl
-                ) {
-
-                    await openExternalUrl(
-                        backendUrl
                     );
 
                 }
@@ -1567,12 +1332,11 @@ export default function ZoeDashboard() {
 
     // ========================================================
     // VOICE PANEL VISIBILITY
+    // Always visible (no longer tied to speech activity)
     // ========================================================
 
     const voicePanelOpen =
-        userSpeaking ||
-        showingFinal ||
-        sttDisplayActive;
+        true;
 
 
     // ========================================================

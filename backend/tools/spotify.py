@@ -318,12 +318,11 @@ def ensure_spotify_open(
     wait_for_device: bool = False,
 ) -> bool:
     """
-    Ensure the Spotify desktop client is running.
+    Ensure Spotify desktop is running.
 
-    If wait_for_device=True, also wait for Spotify Connect to expose
-    a playback device.
+    When wait_for_device=True, launch Spotify if necessary and
+    poll Spotify Connect until a device appears or the timeout expires.
     """
-
     if not is_spotify_running():
         open_spotify()
 
@@ -339,9 +338,126 @@ def ensure_spotify_open(
         except Exception:
             pass
 
-        time.sleep(SPOTIFY_DEVICE_POLL)
+        # If Spotify failed to start or exited, try launching it again.
+        if not is_spotify_running():
+            open_spotify()
+
+        time.sleep(min(SPOTIFY_DEVICE_POLL, max(
+            0.0, deadline - time.monotonic()
+        )))
 
     return False
+
+
+def _ensure_playback_device() -> str:
+    """
+    Find a usable Spotify device.
+
+    If none is available, launch Spotify desktop on the PC,
+    wait for Spotify Connect, and retry device discovery.
+    """
+    device = get_active_device()
+
+    if device and device.get("id"):
+        return device["id"]
+
+    # No device: explicitly launch Spotify on the PC.
+    open_spotify()
+
+    deadline = time.monotonic() + SPOTIFY_DEVICE_WAIT
+
+    while time.monotonic() < deadline:
+        try:
+            devices = get_devices()
+
+            if devices:
+                # Prefer the active device, then the PC, then any device.
+                for candidate in devices:
+                    if candidate.get("is_active") and candidate.get("id"):
+                        return candidate["id"]
+
+                for candidate in devices:
+                    if (
+                        candidate.get("type", "").lower() == "computer"
+                        and candidate.get("id")
+                    ):
+                        return candidate["id"]
+
+                for candidate in devices:
+                    if candidate.get("id"):
+                        return candidate["id"]
+
+        except Exception:
+            pass
+
+        time.sleep(SPOTIFY_DEVICE_POLL)
+
+    raise RuntimeError(
+        "No Spotify playback device became available. "
+        "Spotify was opened on the PC, but Connect did not expose "
+        "a device in time. Open Spotify, sign in, and try again."
+    )
+
+
+def open_spotify() -> bool:
+    """
+    Launch Spotify desktop on Windows, macOS, or Linux.
+    """
+    system = platform.system()
+
+    try:
+        if system == "Windows":
+            # Try the registered Spotify URI handler first.
+            try:
+                os.startfile("spotify:")
+                return True
+            except OSError:
+                pass
+
+            candidates = [
+                Path(os.getenv("APPDATA", ""))
+                / "Spotify" / "Spotify.exe",
+                Path(os.getenv("LOCALAPPDATA", ""))
+                / "Spotify" / "Spotify.exe",
+            ]
+
+            for executable in candidates:
+                if executable.is_file():
+                    subprocess.Popen(
+                        [str(executable)],
+                        stdout=subprocess.DEVNULL,
+                        stderr=subprocess.DEVNULL,
+                    )
+                    return True
+
+            # Fallback for installations registered with Windows.
+            subprocess.Popen(
+                ["cmd", "/c", "start", "", "spotify:"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return True
+
+        if system == "Darwin":
+            subprocess.Popen(
+                ["open", "-a", "Spotify"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            return True
+
+        subprocess.Popen(
+            ["spotify"],
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        return True
+
+    except (OSError, subprocess.SubprocessError):
+        try:
+            return bool(webbrowser.open("spotify:"))
+        except Exception:
+            return False
 
 
 # ============================================================================

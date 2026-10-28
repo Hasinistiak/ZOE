@@ -624,6 +624,7 @@ _ACRONYMS = {
     "2FA": "two factor authentication",
     "HASIN": "Ha-sin",
     "VS": "versus",
+    "GOOGLE": "Goo-gul",
 }
 
 _ACRONYM_PATTERN = re.compile(
@@ -2173,7 +2174,8 @@ if __name__ == "__main__":
 
     SAMPLE = (
         "Hello Hasin. The time is 22:35, and the wind is 27 kph. "
-        "Your Meta login code is 125012. "
+        "Your Google login code is 125012. "
+        "ESP32 is running swiftly as well as your LEDs. "
         "The API call finished. I have 16 GB of RAM and 3 APIs."
     )
 

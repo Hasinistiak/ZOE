@@ -26,7 +26,7 @@ load_dotenv()
 
 MODEL = os.getenv(
     "ZOE_PROJECT_CREATOR_MODEL",
-    "openai/gpt-oss-20b",
+    "openai/gpt-oss-120b",
 )
 
 GROQ_API_KEY = os.getenv(

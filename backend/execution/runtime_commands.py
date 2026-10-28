@@ -29,22 +29,42 @@ def _register_command(
     )
 
 
+
 # ============================================================
 # MUTE / STANDBY
 # ============================================================
 
 def _make_mute_handler_factory() -> Callable[[], Callable[[], Any]]:
     def factory() -> Callable[[], Any]:
-        from backend.zoe import mute_zoe
+        import requests
 
         def _handler() -> dict[str, Any]:
-            mute_zoe()
+            try:
+                response = requests.post(
+                    "http://127.0.0.1:8000/api/microphone/mute",
+                    timeout=10,
+                )
+                response.raise_for_status()
 
-            return {
-                "success": True,
-                "command": "mute",
-                "standby": True,
-            }
+                try:
+                    result = response.json()
+                except ValueError:
+                    result = {}
+
+                return {
+                    "success": True,
+                    "command": "mute",
+                    "standby": True,
+                    "result": result,
+                }
+
+            except requests.RequestException as exc:
+                return {
+                    "success": False,
+                    "command": "mute",
+                    "standby": False,
+                    "error": str(exc),
+                }
 
         return _handler
 
@@ -53,10 +73,9 @@ def _make_mute_handler_factory() -> Callable[[], Callable[[], Any]]:
 
 _register_command(
     "mute",
-    "Put ZOE into standby/sleep mode. Stop active participation and wait until ZOE is awakened again.",
+    "Put ZOE into standby/sleep mode through the microphone mute API.",
     _make_mute_handler_factory(),
 )
-
 
 # ============================================================
 # PUBLIC API

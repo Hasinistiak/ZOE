@@ -126,37 +126,6 @@
 }
 
 
-/* ============================================================
-   TOP LEFT CORNER
-============================================================ */
-
-.processing-hud__rail::after {
-    content: "";
-
-    position: absolute;
-
-    left: 0;
-    top: 0;
-
-    width: 16px;
-    height: 16px;
-
-    border-top:
-        1px solid
-        var(--hud-accent);
-
-    border-left:
-        1px solid
-        var(--hud-accent);
-
-    opacity: 0.75;
-
-    filter:
-        drop-shadow(
-            0 0 5px
-            var(--hud-glow)
-        );
-}
 
 
 /* ============================================================
